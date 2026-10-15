@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+# SPDX-FileCopyrightText: 2025, 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Perform Unpackerr installation tasks
+  when: unpackerr_enabled | bool
+  tags:
+    - setup-all
+    - setup-unpackerr
+    - install-all
+    - install-unpackerr
+  block:
+    - name: Validate Unpackerr configuration
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/validate_config.yml"
+    - name: Install Unpackerr
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
+
+- name: Perform Unpackerr uninstallation tasks
+  when: not unpackerr_enabled | bool
+  tags:
+    - setup-all
+    - setup-unpackerr
+  block:
+    - name: Uninstall Unpackerr
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/uninstall.yml"

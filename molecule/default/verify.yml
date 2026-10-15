@@ -1,0 +1,430 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify Unpackerr
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    # The name carries both the role and the scenario, like the platform does, so
+    # a leftover container can never be mistaken for another scenario's.
+    unpackerr_verify_stock_container: "{{ inventory_hostname }}-stock-control"
+
+    # The watched folder, as the host sees it and as Unpackerr sees it.
+    unpackerr_verify_watch_path: "{{ unpackerr_molecule_downloads_path }}/{{ unpackerr_molecule_watch_folder }}"
+    unpackerr_verify_watch_bind_path: "{{ unpackerr_molecule_downloads_bind_path }}/{{ unpackerr_molecule_watch_folder }}"
+
+    # The release the round trip drops into the watched folder. It is put
+    # together outside the watched folder, but on the same filesystem, so that it
+    # arrives there in one rename - the way a download client moves a finished
+    # download into place.
+    unpackerr_verify_staging_path: "{{ unpackerr_molecule_downloads_path }}/molecule-staging"
+    unpackerr_verify_release_name: molecule-release
+    unpackerr_verify_payload_name: episode.mkv
+    # Distinctive enough that finding it in a file Unpackerr wrote cannot be a
+    # coincidence.
+    unpackerr_verify_payload_marker: packed-by-molecule-and-extracted-by-unpackerr
+
+    # Unpackerr writes what it extracted from a watched item next to it, into a
+    # folder named after the item with this suffix.
+    unpackerr_verify_extracted_payload_path: >-
+      {{ unpackerr_verify_watch_path }}/{{ unpackerr_verify_release_name }}_unpackerred/{{ unpackerr_verify_release_name }}/{{ unpackerr_verify_payload_name }}
+
+    unpackerr_verify_units:
+      - unpackerr.service
+
+  tasks:
+    - name: Verify that Unpackerr works
+      block:
+        # The role is not included in this playbook, so its defaults are not in
+        # scope. Reading defaults/main.yml directly ties the version assertion
+        # below.
+        - name: Load the role defaults
+          ansible.builtin.include_vars:
+            file: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yml"
+            name: unpackerr_defaults
+
+        # ------------------------------------------------------------------
+        # The unit is up and Unpackerr itself is running
+        # ------------------------------------------------------------------
+
+        - name: Wait for the Unpackerr systemd services to become active (up to 180s each)
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+          register: unpackerr_services
+          until: unpackerr_services.status.ActiveState == 'active'
+          retries: 36
+          delay: 5
+          loop: "{{ unpackerr_verify_units }}"
+          # So that giving up is reported by the assertion below rather than as a
+          # wall of systemd unit properties.
+          failed_when: false
+
+        # `Restart=always` in the systemd unit means that even a container which crashes
+        # and gets restarted reads as active here, so this is a precondition rather than
+        # a result.
+        - name: Assert the Unpackerr systemd services are active
+          ansible.builtin.assert:
+            that: unpackerr_services.results | map(attribute='status.ActiveState') | unique | list == ['active']
+            fail_msg: >-
+              Not every service is active:
+              {{ dict(unpackerr_verify_units | zip(unpackerr_services.results | map(attribute='status.ActiveState'))) }}
+            success_msg: "Every systemd service is active"
+
+        - name: Retrieve the Unpackerr systemd services log for debugging
+          when: unpackerr_debug_service_enabled | bool
+          ansible.builtin.command:
+            cmd: "journalctl --no-pager --output=cat --unit={{ item }}"
+          changed_when: false
+          loop: "{{ unpackerr_verify_units }}"
+
+        # The journal is read scoped to the invocation that is running now, because
+        # it also keeps every earlier start of the unit, and a check that accepted
+        # those would still pass after the configuration had been changed and the
+        # service restarted.
+        - name: Ask systemd which invocation of Unpackerr is running
+          ansible.builtin.systemd_service:
+            name: unpackerr.service
+          register: unpackerr_invocation
+
+        # `active` only says a docker client is running. Unpackerr serves nothing
+        # it could be asked about, so the evidence that it is up is what it logs:
+        # it starts watching its folders only after it has read its configuration.
+        - name: Wait for Unpackerr to start watching its folder (up to 180s)
+          ansible.builtin.command:
+            cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
+          register: unpackerr_journal
+          until: "'[Folder] Watching' in unpackerr_journal.stdout"
+          retries: 36
+          delay: 5
+          changed_when: false
+          # So that giving up is reported by the assertions below rather than as
+          # a failed command.
+          failed_when: false
+
+        - name: Inspect Unpackerr container
+          ansible.builtin.command:
+            cmd: "docker container inspect {{ unpackerr_molecule_container }}"
+          register: unpackerr_container_raw
+          changed_when: false
+
+        - name: Assert exactly one Unpackerr container is there to inspect
+          ansible.builtin.assert:
+            that: (unpackerr_container_raw.stdout | from_json) | length == 1
+            fail_msg: >-
+              `docker container inspect {{ unpackerr_molecule_container }}` described
+              {{ (unpackerr_container_raw.stdout | from_json) | length }} containers, so the
+              role's container is not there to be read
+            success_msg: "The role's {{ unpackerr_molecule_container }} container is there"
+
+        - name: Parse the Unpackerr container definition
+          ansible.builtin.set_fact:
+            unpackerr_container: "{{ (unpackerr_container_raw.stdout | from_json)[0] }}"
+
+        - name: Read the Unpackerr image the role pulled
+          ansible.builtin.command:
+            cmd: "docker image inspect {{ unpackerr_container.Config.Image }}"
+          register: unpackerr_image_raw
+          changed_when: false
+
+        - name: Parse the Unpackerr image definition
+          ansible.builtin.set_fact:
+            unpackerr_image: "{{ (unpackerr_image_raw.stdout | from_json)[0] }}"
+
+        # ------------------------------------------------------------------
+        # The negative control: the same image, without the role's doing
+        # ------------------------------------------------------------------
+
+        # With the role's Unpackerr running, this is what says the evidence below
+        # means anything. Unpackerr is not an application that falls over when it
+        # is unconfigured: left entirely alone it starts, logs its settings and
+        # idles - so "Unpackerr is running" is worth nothing here on its own, and
+        # every claim below has to rest on a value this control shows Unpackerr
+        # does not choose for itself.
+        - name: Run the Unpackerr image with none of the role's configuration
+          ansible.builtin.command:
+            cmd: >-
+              docker run -d --rm
+              --name {{ unpackerr_verify_stock_container }}
+              {{ unpackerr_container.Config.Image }}
+          changed_when: true
+
+        - name: Run the negative control with the control container cleaned up afterwards
+          block:
+            - name: Wait for the unconfigured Unpackerr to log its settings (up to 3m)
+              ansible.builtin.command:
+                cmd: "docker logs {{ unpackerr_verify_stock_container }}"
+              register: unpackerr_stock_log
+              until: "'Webserver Disabled' in (unpackerr_stock_log.stdout ~ unpackerr_stock_log.stderr)"
+              retries: 36
+              delay: 5
+              changed_when: false
+
+            - name: Assert the unconfigured Unpackerr picks none of the values this scenario pins
+              ansible.builtin.assert:
+                that:
+                  - "'Starting! PID: 1, UID: 0, GID: 0,' in unpackerr_stock_log.stdout"
+                  - >-
+                    unpackerr_stock_log.stdout is search('Now: [0-9: -]+ \+0000 UTC')
+                  - "'=> Folder Config: 0 paths' in unpackerr_stock_log.stdout"
+                  - "'=> Start/Delete Delay: 1m/' in unpackerr_stock_log.stdout"
+                  - "'No Starr apps or folders configured' in unpackerr_stock_log.stdout"
+                  - unpackerr_image.Config.User | default('') == ''
+                  - unpackerr_image.Config.Volumes | default({}, true) == {}
+                fail_msg: >-
+                  Left to itself the Unpackerr image no longer starts the way this scenario
+                  relies on: {{ unpackerr_stock_log.stdout_lines[:10] }}. Those are the values this
+                  scenario uses as evidence of the role's configuration, so they can no longer
+                  be credited to it.
+                success_msg: >-
+                  Left to itself the Unpackerr image runs as root in UTC, watches no folder and
+                  waits a minute before extracting anything - so the opposite of each, below,
+                  is the role's doing
+
+          always:
+            - name: Remove the unconfigured Unpackerr
+              ansible.builtin.command:
+                cmd: "docker rm --force {{ unpackerr_verify_stock_container }}"
+              changed_when: true
+
+        # ------------------------------------------------------------------
+        # The container is the one the role describes
+        # ------------------------------------------------------------------
+
+        - name: Assert the container runs the way the role describes it
+          ansible.builtin.assert:
+            that:
+              - unpackerr_container.Config.User == (unpackerr_uid ~ ':' ~ unpackerr_gid)
+              - unpackerr_container.HostConfig.ReadonlyRootfs
+              - unpackerr_container.HostConfig.CapDrop == ['ALL']
+              - unpackerr_container.HostConfig.PortBindings | default({}, true) == {}
+              - unpackerr_molecule_network in unpackerr_container.NetworkSettings.Networks
+              - >-
+                (unpackerr_container.Mounts | selectattr('Destination', 'equalto', unpackerr_molecule_downloads_bind_path)
+                 | map(attribute='Source') | list) == [unpackerr_molecule_downloads_path]
+            fail_msg: >-
+              The container runs as {{ unpackerr_container.Config.User }} with a
+              {{ 'read-only' if unpackerr_container.HostConfig.ReadonlyRootfs else 'writable' }} root filesystem,
+              capabilities dropped {{ unpackerr_container.HostConfig.CapDrop }}, publishing
+              {{ unpackerr_container.HostConfig.PortBindings }} on networks
+              {{ unpackerr_container.NetworkSettings.Networks.keys() | list }}, with mounts
+              {{ unpackerr_container.Mounts | map(attribute='Source') | list }}
+            success_msg: >-
+              The container runs as {{ unpackerr_container.Config.User }}, read-only with every capability
+              dropped and nothing published, and sees {{ unpackerr_molecule_downloads_path }} at
+              {{ unpackerr_molecule_downloads_bind_path }}
+
+        # ------------------------------------------------------------------
+        # The running process is the version this role pins, configured by the role
+        # ------------------------------------------------------------------
+
+        # Unpackerr's first log line carries the version linked into the running
+        # binary, followed by its build revision. The image labels its version
+        # without the leading `v` that the pinned tag carries.
+        - name: Assert the running Unpackerr is the version this role installs
+          ansible.builtin.assert:
+            that:
+              - unpackerr_journal.stdout is search('Unpackerr ' ~ (unpackerr_defaults.unpackerr_version | regex_escape) ~ '-[0-9]+ Starting!')
+              - (unpackerr_container.Config.Image | split(':') | last) == unpackerr_defaults.unpackerr_version
+              - unpackerr_image.Config.Labels['org.opencontainers.image.version'] == (unpackerr_defaults.unpackerr_version | regex_replace('^v', ''))
+            fail_msg: >-
+              Unpackerr reports
+              "{{ unpackerr_journal.stdout | regex_search('Unpackerr \S+ Starting!') | default('nothing', true) }}"
+              from {{ unpackerr_container.Config.Image }}, expected {{ unpackerr_defaults.unpackerr_version }}
+            success_msg: >-
+              Unpackerr reports "{{ unpackerr_journal.stdout | regex_search('Unpackerr \S+ Starting!') }}"
+
+        # Every one of these is a value Unpackerr picks differently when it is left
+        # alone - the control container above showed root, UTC, no folder and a
+        # one-minute start delay. The user arrives through the systemd unit, the
+        # rest only through the env file this role renders and hands to the
+        # container, so Unpackerr reporting them is that file arriving at the
+        # process.
+        - name: Assert Unpackerr is running the configuration the role rendered
+          ansible.builtin.assert:
+            that:
+              - >-
+                ('Starting! PID: 1, UID: ' ~ unpackerr_uid ~ ', GID: ' ~ unpackerr_gid ~ ',') in unpackerr_journal.stdout
+              # Europe/Sofia is three hours ahead of UTC in summer and two in winter.
+              - >-
+                unpackerr_journal.stdout is search('Now: [0-9: -]+ \+0[23]00 EES?T')
+              - unpackerr_environment_variables_tz != 'Etc/UTC'
+              - "'=> Using env variables only. Config file not found.' in unpackerr_journal.stdout"
+              - >-
+                ('=> Folder Config: 1 path: ' ~ unpackerr_verify_watch_bind_path ~ ';') in unpackerr_journal.stdout
+              - "'=> Start/Delete Delay: 15s/' in unpackerr_journal.stdout"
+              - >-
+                ('[Folder] Watching (fsnotify): ' ~ unpackerr_verify_watch_bind_path) in unpackerr_journal.stdout
+            fail_msg: >-
+              Unpackerr started with {{ unpackerr_journal.stdout_lines[:12] }}, which is not what the
+              role's env file says
+            success_msg: >-
+              Unpackerr runs as {{ unpackerr_uid }}:{{ unpackerr_gid }} in {{ unpackerr_environment_variables_tz }},
+              reads nothing but its environment, and watches {{ unpackerr_verify_watch_bind_path }}
+              with a 15s start delay, because the role's rendered env file reached the process
+
+        # ------------------------------------------------------------------
+        # A round trip through the watched folder: an archive in, files out
+        # ------------------------------------------------------------------
+
+        - name: Ensure the staging directory for the release exists
+          ansible.builtin.file:
+            path: "{{ unpackerr_verify_staging_path }}"
+            state: directory
+            mode: "0755"
+            owner: "{{ unpackerr_uid }}"
+            group: "{{ unpackerr_gid }}"
+
+        # A release as it typically arrives: a folder holding an archive, which in
+        # turn holds the folder with the actual payload.
+        - name: Pack a release into an archive outside the watched folder
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import os, sys, zipfile
+
+                release_path, payload_name, marker, uid, gid = sys.argv[1:6]
+                release_name = os.path.basename(release_path)
+                archive_path = os.path.join(release_path, release_name + '.zip')
+
+                os.makedirs(release_path)
+                with zipfile.ZipFile(archive_path, 'w') as archive:
+                    archive.writestr(release_name + '/' + payload_name, marker + '\n')
+
+                # As a download client running as the same user would have left it.
+                for path in (release_path, archive_path):
+                    os.chown(path, int(uid), int(gid))
+              - "{{ unpackerr_verify_staging_path }}/{{ unpackerr_verify_release_name }}"
+              - "{{ unpackerr_verify_payload_name }}"
+              - "{{ unpackerr_verify_payload_marker }}"
+              - "{{ unpackerr_uid }}"
+              - "{{ unpackerr_gid }}"
+          changed_when: true
+
+        - name: Move the finished release into the watched folder
+          ansible.builtin.command:
+            argv:
+              - mv
+              - "{{ unpackerr_verify_staging_path }}/{{ unpackerr_verify_release_name }}"
+              - "{{ unpackerr_verify_watch_path }}/"
+          changed_when: true
+
+        # Unpackerr waits `UN_START_DELAY` (15s here) after it last saw the item
+        # change, and then extracts it.
+        - name: Wait for Unpackerr to extract the release (up to 180s)
+          ansible.builtin.stat:
+            path: "{{ unpackerr_verify_extracted_payload_path }}"
+          register: unpackerr_extracted_payload
+          until: unpackerr_extracted_payload.stat.exists
+          retries: 36
+          delay: 5
+          # So that giving up is reported by the assertion below rather than as a
+          # failed stat.
+          failed_when: false
+
+        - name: Read the extracted payload
+          when: unpackerr_extracted_payload.stat.exists
+          ansible.builtin.slurp:
+            src: "{{ unpackerr_verify_extracted_payload_path }}"
+          register: unpackerr_extracted_payload_content
+
+        - name: Read Unpackerr's log lines out of the journal again
+          ansible.builtin.command:
+            cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
+          register: unpackerr_journal_after
+          changed_when: false
+
+        # The file is owned by the user the role runs the container as. The control
+        # above runs as root, so ownership is also what says these were written by
+        # the role's container rather than by anything else.
+        - name: Assert Unpackerr extracted the release into files owned by the role's user
+          ansible.builtin.assert:
+            that:
+              - unpackerr_extracted_payload.stat.exists
+              - (unpackerr_extracted_payload_content.content | b64decode | trim) == unpackerr_verify_payload_marker
+              - unpackerr_extracted_payload.stat.uid == unpackerr_uid | int
+              - unpackerr_extracted_payload.stat.gid == unpackerr_gid | int
+              - >-
+                unpackerr_journal_after.stdout is search(
+                  '\[Folder\] Extraction Finished: ' ~ (unpackerr_verify_watch_bind_path ~ '/' ~ unpackerr_verify_release_name) | regex_escape
+                  ~ ' => .*archives: 1,')
+            fail_msg: >-
+              {{ unpackerr_verify_extracted_payload_path }} is
+              {{ 'there' if unpackerr_extracted_payload.stat.exists else 'missing' }}
+              (owner {{ unpackerr_extracted_payload.stat.uid | default('none') }}:{{ unpackerr_extracted_payload.stat.gid | default('none') }}),
+              and Unpackerr logged
+              {{ unpackerr_journal_after.stdout_lines | select('search', '\[Folder\]') | list }}
+            success_msg: >-
+              Unpackerr extracted the release moved into {{ unpackerr_verify_watch_bind_path }} into
+              {{ unpackerr_verify_extracted_payload_path }}, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
+              and holding exactly what was packed
+
+        - name: Verify nothing was quietly restarting while all of that was being checked
+          when: "unpackerr_restarts_check_enabled | bool"
+          block:
+            # `Restart=always` means the unit reads `active` while it is crash-looping,
+            # so `active` on its own says very little. The window has to be watched with
+            # everything already running.
+            - name: Sample the restart counters
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: unpackerr_restarts_before
+              loop: "{{ unpackerr_verify_units }}"
+
+            # Comfortably longer than the unit's `RestartSec=30`, so a crash loop has to
+            # tick at least once inside the window.
+            - name: Watch the services for 45 seconds
+              ansible.builtin.pause:
+                seconds: 45
+
+            - name: Sample the restart counters again
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: unpackerr_restarts_after
+              loop: "{{ unpackerr_verify_units }}"
+
+            - name: Assert no service restarted while it was up
+              ansible.builtin.assert:
+                that:
+                  - unpackerr_restarts_after.results | map(attribute='status.NRestarts') | list == unpackerr_restarts_before.results | map(attribute='status.NRestarts') | list
+                  - unpackerr_restarts_after.results | map(attribute='status.ActiveState') | unique | list == ['active']
+                fail_msg: >-
+                  A service restarted while it was supposedly up, so `active` was hiding a crash loop.
+                  Before:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_before.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %},
+                  after:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}
+                success_msg: >-
+                  None of the services restarted over 45 seconds of watching (restarts so far:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %})
+
+        - name: Show the Unpackerr verification summary
+          ansible.builtin.debug:
+            msg:
+              - "Unpackerr systemd: {% for unit, state in unpackerr_verify_units | zip(unpackerr_services.results | map(attribute='status.ActiveState')) %}{{ unit }} ({{ state }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Unpackerr restarts: {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | default([]) | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Unpackerr version: {{ unpackerr_journal.stdout | regex_search('Unpackerr \\S+ Starting!') }} from {{ unpackerr_container.Config.Image }}"
+              - "Unpackerr container: user {{ unpackerr_container.Config.User }}, read-only {{ unpackerr_container.HostConfig.ReadonlyRootfs }}, capabilities dropped {{ unpackerr_container.HostConfig.CapDrop }}"
+              - "Unpackerr extracted: {{ unpackerr_verify_extracted_payload_path }} (owner {{ unpackerr_extracted_payload.stat.uid }}:{{ unpackerr_extracted_payload.stat.gid }})"
+
+      rescue:
+        # Whatever went wrong, the reason is almost always in the systemd service log.
+        - name: Retrieve the Unpackerr systemd service log
+          ansible.builtin.command:
+            cmd: journalctl --no-pager --output=cat --unit=unpackerr.service
+          register: unpackerr_service_log
+          changed_when: false
+
+        - name: Show the Unpackerr systemd service log
+          ansible.builtin.debug:
+            var: unpackerr_service_log.stdout_lines
+
+        - name: Fail because verification did not pass
+          ansible.builtin.fail:
+            msg: "Unpackerr verification failed. The systemd service log is printed above."

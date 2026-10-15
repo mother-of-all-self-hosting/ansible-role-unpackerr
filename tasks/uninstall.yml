@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2023, 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+# SPDX-FileCopyrightText: 2025, 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Check existence of Unpackerr systemd service
+  ansible.builtin.stat:
+    path: "{{ devture_systemd_docker_base_systemd_path }}/{{ unpackerr_identifier }}.service"
+  register: unpackerr_service_stat
+
+- name: Uninstall Unpackerr systemd services and files
+  when: unpackerr_service_stat.stat.exists | bool
+  block:
+    - name: Ensure Unpackerr systemd service is stopped
+      ansible.builtin.service:
+        name: "{{ unpackerr_identifier }}"
+        state: stopped
+        enabled: false
+        daemon_reload: true
+
+    - name: Ensure Unpackerr systemd service does not exist
+      ansible.builtin.file:
+        path: "{{ devture_systemd_docker_base_systemd_path }}/{{ unpackerr_identifier }}.service"
+        state: absent
+
+    - name: Ensure Unpackerr support files do not exist
+      ansible.builtin.file:
+        path: "{{ unpackerr_base_path }}/{{ item }}"
+        state: absent
+      with_items:
+        - env
+
+    - name: Ensure Unpackerr base path does not exist if empty
+      ansible.builtin.command:
+        cmd: "rmdir {{ unpackerr_base_path }}"
+      register: unpackerr_base_path_deletion_result
+      changed_when: unpackerr_base_path_deletion_result.rc == 0
+      failed_when: false
+
+    - name: Ensure Unpackerr container network does not exist
+      when: unpackerr_container_network_deletion_enabled
+      block:
+        - name: Ensure Unpackerr container network does not exist via community.docker.docker_network
+          when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
+          community.docker.docker_network:
+            name: "{{ unpackerr_container_network }}"
+            state: absent
+          register: unpackerr_network_deletion_result
+
+        - name: Ensure Unpackerr container network does not exist via ansible.builtin.command
+          when: devture_systemd_docker_base_container_network_creation_method == 'command'
+          ansible.builtin.command:
+            cmd: >-
+              {{ devture_systemd_docker_base_host_command_docker }} network rm
+              {{ unpackerr_container_network }}
+          register: unpackerr_network_deletion_result
+          changed_when: unpackerr_container_network in unpackerr_network_deletion_result.stdout

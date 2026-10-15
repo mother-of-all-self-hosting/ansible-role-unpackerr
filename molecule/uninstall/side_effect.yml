@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Uninstall Unpackerr
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Include the roles the Unpackerr role depends on
+      ansible.builtin.include_role:
+        name: "{{ role_name }}"
+        public: true
+      loop:
+        - com.devture.ansible.role.playbook_help
+        - com.devture.ansible.role.systemd_docker_base
+      loop_control:
+        loop_var: role_name
+
+    # `unpackerr_enabled: false` is the whole uninstallation interface the role
+    # offers its consumers, and the branch of tasks/main.yml that nothing else
+    # in this repository exercises.
+    - name: Run the Unpackerr role with Unpackerr disabled
+      ansible.builtin.include_role:
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+      vars:
+        unpackerr_enabled: false

@@ -1,0 +1,57 @@
+{#
+SPDX-FileCopyrightText: 2025 Slavi Pantaleev
+SPDX-FileCopyrightText: 2025, 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+[Unit]
+Description=Unpackerr ({{ unpackerr_identifier }})
+{% for service in unpackerr_systemd_required_services_list %}
+Requires={{ service }}
+After={{ service }}
+{% endfor %}
+{% for service in unpackerr_systemd_wanted_services_list %}
+Wants={{ service }}
+{% endfor %}
+
+[Service]
+Type=simple
+Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
+ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ unpackerr_container_cleanup_command | trim | replace("\n", " ") }}'
+
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
+      --rm \
+      --name={{ unpackerr_identifier }} \
+      --log-driver=none \
+      --user={{ unpackerr_uid }}:{{ unpackerr_gid }} \
+      --cap-drop=ALL \
+      --read-only \
+      --network={{ unpackerr_container_network }} \
+      --env-file={{ unpackerr_base_path }}/env \
+      {% for volume in unpackerr_container_additional_volumes %}
+      --mount type={{ volume.type | default('bind' if '/' in volume.src else 'volume') }},src={{ volume.src }},dst={{ volume.dst }}{{ (',' + volume.options) if volume.options | default('') else '' }} \
+      {% endfor %}
+      {% for arg in unpackerr_container_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+      {{ unpackerr_container_image }} \
+      {% for arg in unpackerr_process_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+
+{% for network in unpackerr_container_additional_networks %}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ unpackerr_identifier }}
+{% endfor %}
+
+ExecStart={{ devture_systemd_docker_base_host_command_docker }} start --attach {{ unpackerr_identifier }}
+
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} stop -t {{ unpackerr_container_stop_grace_time_seconds }} {{ unpackerr_identifier }} 2>/dev/null || true'
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} rm {{ unpackerr_identifier }} 2>/dev/null || true'
+
+Restart=always
+RestartSec=30
+SyslogIdentifier={{ unpackerr_identifier }}
+
+[Install]
+WantedBy=multi-user.target

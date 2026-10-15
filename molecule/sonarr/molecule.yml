@@ -1,0 +1,114 @@
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    force: true
+driver:
+  name: docker
+platforms:
+  # The name carries both the role and the scenario, so that scenarios running
+  # in parallel cannot collide on it.
+  - name: unpackerr-${MOLECULE_DISTRO:-ubuntu2604}-sonarr
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2604}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # Docker inside the instance stores images via containerd. Its storage
+      # cannot use overlay on top of the instance's own overlay filesystem, so a
+      # volume puts it on a real filesystem.
+      - /var/lib/containerd
+    # Remove volumes along with the instance, so that local runs do not leave
+    # gigabytes behind.
+    keep_volumes: false
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+  inventory:
+    group_vars:
+      all:
+        # Helper variables
+        unpackerr_debug_service_enabled: false
+        unpackerr_restarts_check_enabled: true
+
+        # The containers and paths the two roles derive from their identifiers.
+        # Role defaults are not in scope in a verify play, so they are spelled out.
+        unpackerr_molecule_container: unpackerr
+        unpackerr_molecule_sonarr_network: sonarr
+
+        # The download directory both Sonarr and Unpackerr see, as it exists on
+        # the host and as it is mounted into both containers - at the very same
+        # path, as docs/configuring-unpackerr.md asks for. That path is
+        # deliberately not `/downloads`, which Unpackerr falls back to on its own
+        # when it is given no path for a Starr app, so that the path it reports
+        # can only have come from the role.
+        unpackerr_molecule_downloads_path: /srv/downloads
+        unpackerr_molecule_downloads_bind_path: /data/downloads
+
+        # Where Unpackerr reaches Sonarr: by the name of the container that
+        # ansible-role-sonarr runs, on the container network that role creates
+        # (which Unpackerr joins below), and on Sonarr's own port there.
+        unpackerr_molecule_sonarr_url: http://sonarr:8989
+
+        # Where the verification itself reaches Sonarr, to establish first-hand
+        # that Sonarr hands its queue only to the API key.
+        unpackerr_molecule_sonarr_verify_url: http://127.0.0.1:8989
+
+        # The API key Sonarr is started with, and which Unpackerr is handed.
+        # Sonarr otherwise generates a random one on its first start, which
+        # would have to be read back out of its config.xml before Unpackerr
+        # could be configured.
+        unpackerr_molecule_sonarr_api_key: 6d6f6c6563756c652d736f6e61727221
+
+        # Variables for Unpackerr
+        unpackerr_uid: 1000
+        unpackerr_gid: 1000
+
+        # The wiring docs/configuring-unpackerr.md describes, done through the
+        # `_auto` variables the way a playbook integrating both roles would do it:
+        # Unpackerr joins Sonarr's container network, sees the download directory
+        # at the very path Sonarr sees it at, and pulls Sonarr in whenever it
+        # starts.
+        unpackerr_container_additional_networks_auto:
+          - "{{ sonarr_container_network }}"
+        unpackerr_container_additional_volumes_auto:
+          - type: bind
+            src: "{{ unpackerr_molecule_downloads_path }}"
+            dst: "{{ unpackerr_molecule_downloads_bind_path }}"
+        unpackerr_systemd_wanted_services_list_auto:
+          - "{{ sonarr_identifier }}.service"
+
+        # `UN_INTERVAL` is Unpackerr's own minimum. Its default of 2m would only
+        # make the verification wait longer for a poll that fails.
+        unpackerr_environment_variables_additional_variables: |
+          UN_INTERVAL=15s
+          UN_SONARR_0_URL={{ unpackerr_molecule_sonarr_url }}
+          UN_SONARR_0_API_KEY={{ unpackerr_molecule_sonarr_api_key }}
+          UN_SONARR_0_PATHS_0={{ unpackerr_molecule_downloads_bind_path }}
+
+        # Variables for Sonarr
+        sonarr_uid: 1000
+        sonarr_gid: 1000
+        sonarr_hostname: localhost
+        sonarr_container_labels_traefik_enabled: false
+        sonarr_container_http_bind_port: 127.0.0.1:8989
+        sonarr_container_additional_volumes_custom:
+          - type: bind
+            src: "{{ unpackerr_molecule_downloads_path }}"
+            dst: "{{ unpackerr_molecule_downloads_bind_path }}"
+        sonarr_environment_variables_additional_variables: |
+          SONARR__AUTH__APIKEY={{ unpackerr_molecule_sonarr_api_key }}
+  env:
+    # Workaround for https://github.com/ansible/molecule/issues/4391
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles
+verifier:
+  name: ansible

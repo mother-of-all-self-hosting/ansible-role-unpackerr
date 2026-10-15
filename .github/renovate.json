@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Patch releases of Unpackerr are NOT automerged here, even though Unpackerr keeps no database and runs no migrations. What it does do is delete files in the operator's download directory: the files it extracted, a few minutes after a Starr app imported them, and with `delete_orig` (or a watched folder's `delete_original`) the downloads themselves. A release that gets that cleanup wrong removes data that pinning the previous tag cannot bring back, and nothing a Molecule run does can see it - a scenario has no Starr app importing anything, and Unpackerr waits at least the configured delay before it deletes. Upstream keeps changing exactly that code (removing emptied folders up to the download folder arrived in 0.15.0, the `remnant_action` handling of leftovers in 0.16.0), so its version stays a human-reviewed pull request, where the release notes can be read for it.",
+    "What the Molecule scenarios do gate is that the image a bump produced starts with the version pinned here, extracts an archive moved into a watched folder into files owned by the role's user, and reads the queue of a real Sonarr with the API key it was handed."
+  ],
+  "extends": [
+    "github>mother-of-all-self-hosting/renovate-config#v1.1.0"
+  ],
+  "packageRules": [
+    {
+      "description": "ghcr.io/unpackerr/unpackerr publishes every release since 0.14.0 twice, as `vX.Y.Z` and as `X.Y.Z`, next to floating `0` and `0.N` tags and `latest`, `nightly` and `unstable`. `versioning=semver` on the annotation in defaults/main.yml already rejects the floating and named tags, but treats `v0.16.2` and `0.16.2` as the same version. Restricting the allowed versions to the `v`-prefixed family keeps a bump from flipping the pin from one family to the other.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/unpackerr/unpackerr"],
+      "allowedVersions": "/^v\\d+\\.\\d+\\.\\d+$/"
+    }
+  ]
+}

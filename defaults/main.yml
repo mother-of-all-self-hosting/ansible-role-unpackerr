@@ -35,7 +35,7 @@ unpackerr_container_network_deletion_enabled: true
 
 # A list of additional container networks that the container would be connected to.
 # The role does not create these networks, so make sure they already exist.
-# Use this to let Unpackerr reach Sonarr, Radarr, etc. which run in a different container network.
+# Use this to let Unpackerr reach Sonarr, Radarr, etc., which run in a different container network.
 unpackerr_container_additional_networks: "{{ (unpackerr_container_additional_networks_default + unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom) | unique }}"
 unpackerr_container_additional_networks_default: []
 unpackerr_container_additional_networks_auto: []

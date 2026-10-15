@@ -53,7 +53,8 @@ provisioner:
         # The release converge.yml drops into the watched folder, and the file
         # Unpackerr extracts out of it.
         unpackerr_molecule_release_name: molecule-release
-        unpackerr_molecule_extracted_payload_path: /srv/downloads/watch/molecule-release_unpackerred/molecule-release/episode.mkv
+        unpackerr_molecule_extracted_payload_path: >-
+          {{ unpackerr_molecule_downloads_path }}/{{ unpackerr_molecule_watch_folder }}/{{ unpackerr_molecule_release_name }}_unpackerred/{{ unpackerr_molecule_release_name }}/episode.mkv
 
         # Variables for Unpackerr
         unpackerr_uid: 1000

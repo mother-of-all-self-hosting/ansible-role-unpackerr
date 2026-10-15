@@ -54,7 +54,7 @@ It first runs the same container image with none of the role's configuration, to
 - the container runs as the configured user, read-only with every capability dropped and nothing published, and sees the download directory at the path the role mounts it at;
 - the running process reports the version `unpackerr_version` pins, matching the image tag and the image's OCI version label;
 - the user, timezone, watched folder and start delay Unpackerr is running with are the ones the role configured — all of them deliberately different from what Unpackerr picks for itself — and it reads nothing but its environment;
-- an archive moved into the watched folder is extracted next to it, into files owned by the role's user holding exactly what was packed, while the archive itself is left in place;
+- a release folder holding an archive, moved into the watched folder, is extracted into a new folder next to it, as files owned by the role's user holding exactly what was packed;
 - the service does not restart during a window longer than the unit's `RestartSec`.
 
 ### `sonarr`
@@ -62,7 +62,9 @@ It first runs the same container image with none of the role's configuration, to
 Installs Sonarr with [ansible-role-sonarr](https://github.com/mother-of-all-self-hosting/ansible-role-sonarr) alongside Unpackerr, wired together the way [the documentation](../docs/configuring-unpackerr.md#connecting-unpackerr-to-the-starr-apps) describes. It checks that:
 
 - Sonarr hands out its queue to its API key, and refuses anonymous callers;
-- Unpackerr reaches Sonarr by its container name and reads the very queue that Sonarr reports first-hand, while the same image holding a key Sonarr never issued is refused;
+- starting Unpackerr brings Sonarr up with it;
+- Unpackerr reaches Sonarr by its container name and reads its queue with the API key the role handed it, while the same image holding a key Sonarr never issued is refused;
+- the download path Unpackerr looks in is the one the role handed it, rather than the `/downloads` it falls back to on its own;
 - Sonarr and Unpackerr see a folder placed into the download directory at the same path;
 - neither service restarts during a window longer than the units' `RestartSec`.
 

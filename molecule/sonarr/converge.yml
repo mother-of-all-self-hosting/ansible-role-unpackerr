@@ -40,11 +40,9 @@
       ansible.builtin.systemd_service:
         daemon_reload: true
 
-    - name: Ensure Sonarr systemd service is started
-      ansible.builtin.systemd_service:
-        name: sonarr.service
-        state: started
-
+    # Sonarr is deliberately not started here. Unpackerr's unit wants it (see
+    # `unpackerr_systemd_wanted_services_list_auto` in molecule.yml), so
+    # starting Unpackerr is what has to bring Sonarr up.
     - name: Ensure Unpackerr systemd service is started
       ansible.builtin.systemd_service:
         name: unpackerr.service

@@ -132,8 +132,9 @@ expect 'version bump' v0.10.1-0 "$(merge "$bump_version")"
 scenario 'The leading v that the version value already carries'
 expect 'version bump' v0.10.1-0 "$(merge "$bump_version")"
 
-# Unpackerr publishes every release as an image tag without the `v` as well, so
-# the same release may be pinned either way. Both must continue one counter.
+# Unpackerr publishes every release since 0.14.0 as an image tag without the `v`
+# as well, so the same release may be pinned either way. Both must continue one
+# counter.
 scenario 'A version value without the leading v'
 expect 'version bump' v0.10.1-0 "$(merge "$unprefixed_version")"
 expect 'task edit'    v0.10.1-1 "$(merge "$edit_task")"

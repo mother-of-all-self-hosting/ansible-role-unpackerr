@@ -45,11 +45,10 @@ provisioner:
         unpackerr_debug_service_enabled: false
         unpackerr_restarts_check_enabled: true
 
-        # The container, network and path the role derives from its identifier.
+        # The container and network the role derives from its identifier.
         # Role defaults are not in scope in a verify play, so they are spelled out.
         unpackerr_molecule_container: unpackerr
         unpackerr_molecule_network: unpackerr
-        unpackerr_molecule_base_path: /unpackerr
 
         # The download directory, as it exists on the host and as it is mounted
         # into the container. They are deliberately different paths, so that

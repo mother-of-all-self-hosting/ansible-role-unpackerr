@@ -43,22 +43,24 @@ provisioner:
         # The containers and paths the two roles derive from their identifiers.
         # Role defaults are not in scope in a verify play, so they are spelled out.
         unpackerr_molecule_container: unpackerr
-        unpackerr_molecule_sonarr_container: sonarr
         unpackerr_molecule_sonarr_network: sonarr
 
         # The download directory both Sonarr and Unpackerr see, as it exists on
         # the host and as it is mounted into both containers - at the very same
-        # path, as docs/configuring-unpackerr.md asks for.
+        # path, as docs/configuring-unpackerr.md asks for. That path is
+        # deliberately not `/downloads`, which Unpackerr falls back to on its own
+        # when it is given no path for a Starr app, so that the path it reports
+        # can only have come from the role.
         unpackerr_molecule_downloads_path: /srv/downloads
-        unpackerr_molecule_downloads_bind_path: /downloads
+        unpackerr_molecule_downloads_bind_path: /data/downloads
 
         # Where Unpackerr reaches Sonarr: by the name of the container that
         # ansible-role-sonarr runs, on the container network that role creates
         # (which Unpackerr joins below), and on Sonarr's own port there.
         unpackerr_molecule_sonarr_url: http://sonarr:8989
 
-        # Where the verification itself reaches Sonarr, to compare what Unpackerr
-        # reports against what Sonarr reports first-hand.
+        # Where the verification itself reaches Sonarr, to establish first-hand
+        # that Sonarr hands its queue only to the API key.
         unpackerr_molecule_sonarr_verify_url: http://127.0.0.1:8989
 
         # The API key Sonarr is started with, and which Unpackerr is handed.

@@ -4,7 +4,7 @@ galaxy_info:
   company: spatterlight
   role_name: unpackerr
   namespace: mash
-  description: An Ansible role for installing Unpackerr, which extracts downloads for Sonarr, Radarr, Lidarr, Readarr, and watch folders
+  description: An Ansible role for installing Unpackerr, an archive extraction daemon for Sonarr, Radarr, Lidarr and other Starr apps
   platforms:
     - name: Debian
       versions:

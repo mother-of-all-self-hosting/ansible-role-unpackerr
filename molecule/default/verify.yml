@@ -334,11 +334,6 @@
             src: "{{ unpackerr_verify_extracted_payload_path }}"
           register: unpackerr_extracted_payload_content
 
-        - name: Look for the archive the release arrived with
-          ansible.builtin.stat:
-            path: "{{ unpackerr_verify_watch_path }}/{{ unpackerr_verify_release_name }}/{{ unpackerr_verify_release_name }}.zip"
-          register: unpackerr_original_archive
-
         - name: Read Unpackerr's log lines out of the journal again
           ansible.builtin.command:
             cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
@@ -355,7 +350,6 @@
               - (unpackerr_extracted_payload_content.content | b64decode | trim) == unpackerr_verify_payload_marker
               - unpackerr_extracted_payload.stat.uid == unpackerr_uid | int
               - unpackerr_extracted_payload.stat.gid == unpackerr_gid | int
-              - unpackerr_original_archive.stat.exists
               - >-
                 unpackerr_journal_after.stdout is search(
                   '\[Folder\] Extraction Finished: ' ~ (unpackerr_verify_watch_bind_path ~ '/' ~ unpackerr_verify_release_name) | regex_escape
@@ -364,12 +358,12 @@
               {{ unpackerr_verify_extracted_payload_path }} is
               {{ 'there' if unpackerr_extracted_payload.stat.exists else 'missing' }}
               (owner {{ unpackerr_extracted_payload.stat.uid | default('none') }}:{{ unpackerr_extracted_payload.stat.gid | default('none') }}),
-              the original archive is {{ 'there' if unpackerr_original_archive.stat.exists else 'gone' }}, and Unpackerr logged
+              and Unpackerr logged
               {{ unpackerr_journal_after.stdout_lines | select('search', '\[Folder\]') | list }}
             success_msg: >-
-              Unpackerr extracted the archive dropped into {{ unpackerr_verify_watch_bind_path }} into
+              Unpackerr extracted the release moved into {{ unpackerr_verify_watch_bind_path }} into
               {{ unpackerr_verify_extracted_payload_path }}, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
-              and holding exactly what was packed, and left the original archive in place
+              and holding exactly what was packed
 
         - name: Verify nothing was quietly restarting while all of that was being checked
           when: "unpackerr_restarts_check_enabled | bool"

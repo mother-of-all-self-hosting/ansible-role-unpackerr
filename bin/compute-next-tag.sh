@@ -49,10 +49,10 @@ if [ -z "$version" ]; then
 	exit 1
 fi
 
-# Unpackerr publishes every release as an image tag both with and without the
-# leading `v` (`v0.16.1` and `0.16.1`), and this repository's tags carry it.
-# Stripping it before putting it back produces the same tag whichever of the
-# two is pinned, rather than a doubled `vv` prefix or none at all.
+# Unpackerr publishes every release since 0.14.0 as an image tag both with and
+# without the leading `v` (`v0.16.1` and `0.16.1`), and this repository's tags
+# carry it. Stripping it before putting it back produces the same tag whichever
+# of the two is pinned, rather than a doubled `vv` prefix or none at all.
 tag_prefix="v${version#v}-"
 
 # Of all releases of this version, the highest release number. Sorted

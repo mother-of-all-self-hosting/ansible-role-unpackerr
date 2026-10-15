@@ -120,9 +120,9 @@ There are some additional things you may wish to configure about the service.
 
 Take a look at:
 
-- [`defaults/main.yml`](../defaults/main.yml) for some variables that you can customize via your `vars.yml` file. You can configure Unpackerr further with the `unpackerr_environment_variables_additional_variables` variable
+- [`defaults/main.yml`](../defaults/main.yml) for some variables that you can customize via your `vars.yml` file. You can override settings (even those that don't have dedicated playbook variables) using the `unpackerr_environment_variables_additional_variables` variable
 
-Refer to [this page](https://unpackerr.zip/docs/install/configuration) on the documentation for a complete list of Unpackerr's config options. Each of them can be set with the environment variable listed there, which is what you can put in `unpackerr_environment_variables_additional_variables`.
+Refer to [this page](https://unpackerr.zip/docs/install/configuration) on the documentation for a complete list of Unpackerr's config options that you can put in `unpackerr_environment_variables_additional_variables`.
 
 >[!NOTE]
 > Unpackerr is configured through environment variables only. This role does not mount a `/config` directory into the container, so Unpackerr neither reads nor creates an `unpackerr.conf` file.
@@ -139,7 +139,7 @@ If you use the MASH playbook, the shortcut commands with the [`just` program](ht
 
 ## Usage
 
-Unpackerr has no web UI. After running the command for installation, it starts working in the background: as soon as a Starr app lists a completed download containing archives in its queue, Unpackerr extracts them in place, so that the Starr app can import the extracted files. A few minutes after the import, Unpackerr deletes the extracted files again, leaving the original download as it was (so that it can keep seeding, for example).
+After running the command for installation, Unpackerr starts working in the background, as it has no web UI. It checks the queues of the Starr apps every 2 minutes, and when it finds a completed download containing archives, it extracts them in place after a short delay (1 minute by default), so that the Starr app can import the extracted files. A few minutes after the import, Unpackerr deletes the extracted files again, leaving the original download as it was (so that it can keep seeding, for example).
 
 ## Troubleshooting
 
@@ -149,11 +149,13 @@ You can find the logs in [systemd-journald](https://www.freedesktop.org/software
 
 On startup, Unpackerr logs the settings it is running with, including every Starr app and folder it has been configured with. If it cannot reach a Starr app, or the Starr app refuses the API key, an error is logged every time it tries to read the app's queue.
 
-### Increase logging verbosity
+#### Increase logging verbosity
 
-If you want to see more details in the logs, add the following configuration to your `vars.yml` file:
+If you want to increase the verbosity, add the following configuration to your `vars.yml` file:
 
 ```yaml
 unpackerr_environment_variables_additional_variables: |
   UN_DEBUG=true
 ```
+
+If you have already defined the variable to connect Unpackerr to Starr apps or to watch folders, add this line to the same variable rather than defining it twice.

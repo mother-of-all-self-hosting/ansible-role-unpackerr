@@ -1,0 +1,133 @@
+# SPDX-FileCopyrightText: 2023, 2024 Nikita Chernyi
+# SPDX-FileCopyrightText: 2023-2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2024 Sergio Durigan Junior
+# SPDX-FileCopyrightText: 2025 MASH project contributors
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+# SPDX-FileCopyrightText: 2025, 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+# Project source code URL: https://github.com/Unpackerr/unpackerr
+
+unpackerr_enabled: true
+
+unpackerr_identifier: unpackerr
+unpackerr_base_path: "/{{ unpackerr_identifier }}"
+
+# renovate: datasource=docker depName=ghcr.io/unpackerr/unpackerr versioning=semver
+unpackerr_version: v0.16.1
+
+unpackerr_uid: ""
+unpackerr_gid: ""
+
+unpackerr_container_image: "{{ unpackerr_container_image_registry_prefix }}unpackerr/unpackerr:{{ unpackerr_container_image_tag }}"
+unpackerr_container_image_tag: "{{ unpackerr_version }}"
+unpackerr_container_image_registry_prefix: "{{ unpackerr_container_image_registry_prefix_upstream }}"
+unpackerr_container_image_registry_prefix_upstream: "{{ unpackerr_container_image_registry_prefix_upstream_default }}"
+unpackerr_container_image_registry_prefix_upstream_default: ghcr.io/
+
+# The base container network. It will be auto-created by this role if it doesn't exist already.
+unpackerr_container_network: "{{ unpackerr_identifier }}"
+
+# Control if the container network is deleted on uninstalling.
+unpackerr_container_network_deletion_enabled: true
+
+# A list of additional container networks that the container would be connected to.
+# The role does not create these networks, so make sure they already exist.
+# Use this to let Unpackerr reach Sonarr, Radarr, etc. which run in a different container network.
+unpackerr_container_additional_networks: "{{ (unpackerr_container_additional_networks_default + unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom) | unique }}"
+unpackerr_container_additional_networks_default: []
+unpackerr_container_additional_networks_auto: []
+unpackerr_container_additional_networks_custom: []
+
+# A list of additional "volumes" to mount in the container.
+# This list gets populated dynamically at runtime. You can provide a different default value,
+# if you wish to mount your own files into the container.
+# Contains definition objects like this: `{"type": "bind", "src": "/outside", "dst": "/inside", "options": "readonly"}.
+# See the `--mount` documentation for the `docker run` command.
+#
+# Unpackerr needs the download directory to be mounted here at exactly the same path
+# that Sonarr, Radarr, etc. see it at. See `../docs/configuring-unpackerr.md` for details.
+unpackerr_container_additional_volumes: "{{ unpackerr_container_additional_volumes_auto + unpackerr_container_additional_volumes_custom }}"
+unpackerr_container_additional_volumes_auto: []
+unpackerr_container_additional_volumes_custom: []
+
+# A list of extra arguments to pass to the container (`docker create` command)
+unpackerr_container_extra_arguments: "{{ unpackerr_container_extra_arguments_auto + unpackerr_container_extra_arguments_custom }}"
+unpackerr_container_extra_arguments_auto: []
+unpackerr_container_extra_arguments_custom: []
+
+# A list of extra arguments to pass to the process inside the container
+# Example: ['--SOME_ARGUMENT']
+unpackerr_process_extra_arguments: "{{ unpackerr_process_extra_arguments_auto + unpackerr_process_extra_arguments_custom }}"
+unpackerr_process_extra_arguments_auto: []
+unpackerr_process_extra_arguments_custom: []
+
+# List of systemd services that the Unpackerr systemd service depends on
+unpackerr_systemd_required_services_list: "{{ (unpackerr_systemd_required_services_list_default + unpackerr_systemd_required_services_list_auto + unpackerr_systemd_required_services_list_custom) | unique }}"
+unpackerr_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
+unpackerr_systemd_required_services_list_auto: []
+unpackerr_systemd_required_services_list_custom: []
+
+# List of systemd services that the Unpackerr systemd service wants
+unpackerr_systemd_wanted_services_list: "{{ (unpackerr_systemd_wanted_services_list_default + unpackerr_systemd_wanted_services_list_auto + unpackerr_systemd_wanted_services_list_custom) | unique }}"
+unpackerr_systemd_wanted_services_list_default: []
+unpackerr_systemd_wanted_services_list_auto: []
+unpackerr_systemd_wanted_services_list_custom: []
+
+# Controls how long to wait for the container to stop gracefully before killing it.
+unpackerr_container_stop_grace_time_seconds: "{{ devture_systemd_docker_base_container_stop_grace_time_seconds }}"
+
+# Controls how long the pre-start cleanup should wait for stale container-name release
+# before failing startup explicitly.
+unpackerr_container_cleanup_timeout_seconds: "{{ devture_systemd_docker_base_container_cleanup_timeout_seconds }}"
+
+# Controls the delay between pre-start cleanup retries.
+unpackerr_container_cleanup_retry_delay_seconds: "{{ devture_systemd_docker_base_container_cleanup_retry_delay_seconds }}"
+
+# Shell command used in the systemd pre-start phase to deterministically remove a stale
+# container and wait until Docker releases its name.
+unpackerr_container_cleanup_command: |
+  i=0;
+  while [ "$i" -lt {{ unpackerr_container_cleanup_timeout_seconds }} ]; do
+  {{ devture_systemd_docker_base_host_command_docker }} stop -t {{ unpackerr_container_stop_grace_time_seconds }} {{ unpackerr_identifier }} >/dev/null 2>&1 || true;
+  {{ devture_systemd_docker_base_host_command_docker }} rm -f {{ unpackerr_identifier }} >/dev/null 2>&1 || true;
+  if {{ devture_systemd_docker_base_host_command_docker }} container inspect {{ unpackerr_identifier }} >/dev/null 2>&1; then
+  i=$((i + 1));
+  sleep {{ unpackerr_container_cleanup_retry_delay_seconds }};
+  continue;
+  fi;
+  if {{ devture_systemd_docker_base_host_command_docker }} info >/dev/null 2>&1; then
+  exit 0;
+  fi;
+  echo "Failed to query Docker daemon while cleaning up {{ unpackerr_identifier }}" >&2;
+  exit 1;
+  done;
+  echo "Failed to remove stale container {{ unpackerr_identifier }} after {{ unpackerr_container_cleanup_timeout_seconds }} attempts" >&2;
+  exit 1
+
+# Specify the timezone
+unpackerr_environment_variables_tz: "Etc/UTC"
+
+# Additional environment variables.
+#
+# Unpackerr is configured with `UN_*` environment variables (e.g. `UN_SONARR_0_URL`, `UN_RADARR_0_API_KEY`, `UN_FOLDER_0_PATH`, etc.).
+# See: https://unpackerr.zip/docs/install/configuration
+#
+# Example:
+# unpackerr_environment_variables_additional_variables: |
+#   UN_SONARR_0_URL=http://sonarr:8989
+#   UN_SONARR_0_API_KEY=YOUR_SONARR_API_KEY_HERE
+#   UN_SONARR_0_PATHS_0=/downloads
+unpackerr_environment_variables_additional_variables: ""
+
+# unpackerr_restart_necessary controls whether the Unpackerr systemd
+# service will be restarted (when true) or merely started (when false) by the
+# systemd service manager role (when conditional restart is enabled).
+#
+# This value is automatically computed during installation based on whether
+# any configuration files, the systemd service file, or the container image changed.
+# The default of `false` means "no restart needed" — appropriate when the role's
+# installation tasks haven't run (e.g., due to --tags skipping them).
+unpackerr_restart_necessary: false

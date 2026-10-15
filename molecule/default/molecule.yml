@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 Suguru Hirahara
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    force: true
+driver:
+  name: docker
+platforms:
+  # The name carries both the role and the scenario, so that scenarios running
+  # in parallel cannot collide on it.
+  - name: unpackerr-${MOLECULE_DISTRO:-ubuntu2604}-default
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2604}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # Docker inside the instance stores images via containerd. Its storage
+      # cannot use overlay on top of the instance's own overlay filesystem, so a
+      # volume puts it on a real filesystem.
+      - /var/lib/containerd
+    # Remove volumes along with the instance, so that local runs do not leave
+    # gigabytes behind.
+    keep_volumes: false
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    # Deliberately no published ports. Unpackerr serves nothing over HTTP in
+    # this scenario, and everything the verification looks at is reached from
+    # inside this container.
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+  inventory:
+    group_vars:
+      all:
+        # Helper variables
+        unpackerr_debug_service_enabled: false
+        unpackerr_restarts_check_enabled: true
+
+        # The container, network and path the role derives from its identifier.
+        # Role defaults are not in scope in a verify play, so they are spelled out.
+        unpackerr_molecule_container: unpackerr
+        unpackerr_molecule_network: unpackerr
+        unpackerr_molecule_base_path: /unpackerr
+
+        # The download directory, as it exists on the host and as it is mounted
+        # into the container. They are deliberately different paths, so that
+        # what Unpackerr reports about the container path can be told apart from
+        # what the verification reads off the host path.
+        unpackerr_molecule_downloads_path: /srv/downloads
+        unpackerr_molecule_downloads_bind_path: /downloads
+
+        # The folder that Unpackerr watches, inside the download directory.
+        unpackerr_molecule_watch_folder: watch
+
+        # Variables for Unpackerr
+        unpackerr_uid: 1000
+        unpackerr_gid: 1000
+
+        # The download directory, mounted the way docs/configuring-unpackerr.md
+        # describes.
+        unpackerr_container_additional_volumes_custom:
+          - type: bind
+            src: "{{ unpackerr_molecule_downloads_path }}"
+            dst: "{{ unpackerr_molecule_downloads_bind_path }}"
+
+        # Deliberately not the role's default of Etc/UTC. Unpackerr reports its
+        # timezone in the first line it logs, so this becomes an observable
+        # difference in the journal rather than a value that merely sits in a file.
+        unpackerr_environment_variables_tz: Europe/Sofia
+
+        # Passed through to the container verbatim by the role. Unpackerr left
+        # to itself watches no folder at all and waits a minute before it
+        # extracts anything, which is what makes these usable as evidence that
+        # the pass-through works. 15s is Unpackerr's own minimum start delay.
+        unpackerr_environment_variables_additional_variables: |
+          UN_FOLDER_0_PATH={{ unpackerr_molecule_downloads_bind_path }}/{{ unpackerr_molecule_watch_folder }}
+          UN_START_DELAY=15s
+  env:
+    # Workaround for https://github.com/ansible/molecule/issues/4391
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles
+verifier:
+  name: ansible

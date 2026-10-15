@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Patch-level bumps are automerged. Unpackerr keeps no database and runs no migrations: the downloads it is tracking live in an in-memory map that is rebuilt from the Starr apps' queues and the watched folders after every start. Inside Docker it would write an example config file into /config if that directory existed, but this role mounts nothing there and configures no log file, so the container writes nothing of its own anywhere - a version bump is a pure image swap.",
+    "What the Molecule scenarios gate is that the image a bump produced reports exactly the version pinned here, extracts an archive dropped into a watched folder into files owned by the role's user, and polls the queue of a real Sonarr with the API key it was handed. What no Molecule run can show is a regression in the cleanup Unpackerr does after an import; that is upstream application behavior that a pinned previous tag rolls back, not a one-way change to state this role manages.",
+    "Under `semver` Unpackerr's 0.x releases arrive as patches (0.16.0 -> 0.16.1) or minors (0.15.2 -> 0.16.0), and the minor bumps stay human-reviewed pull requests."
+  ],
+  "extends": [
+    "github>mother-of-all-self-hosting/renovate-config#v1.1.0",
+    "github>mother-of-all-self-hosting/renovate-config//patch-automerge#v1.1.0"
+  ],
+  "packageRules": [
+    {
+      "description": "ghcr.io/unpackerr/unpackerr publishes every release twice, as `vX.Y.Z` and as `X.Y.Z` (both families are complete from 0.14.0 on), next to floating `0` and `0.N` tags and `latest`, `nightly` and `unstable`. `versioning=semver` on the annotation in defaults/main.yml already rejects the floating and named tags, but treats `v0.16.2` and `0.16.2` as the same version. Restricting the allowed versions to the `v`-prefixed family keeps a bump from flipping the pin from one family to the other.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/unpackerr/unpackerr"],
+      "allowedVersions": "/^v\\d+\\.\\d+\\.\\d+$/"
+    }
+  ]
+}

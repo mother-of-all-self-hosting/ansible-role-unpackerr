@@ -1,0 +1,114 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify that Unpackerr uninstalled itself
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Everything below is about things being gone, and "gone" is the state an
+    # empty machine is in too. This is what says the machine was not empty: the
+    # files Unpackerr extracted while it was running are still here, which is
+    # both the evidence that the installation happened and the deliberate
+    # behavior the role documents - it removes the service, never the
+    # operator's data.
+    - name: Look for the file Unpackerr extracted while it was installed
+      ansible.builtin.stat:
+        path: "{{ unpackerr_molecule_extracted_payload_path }}"
+      register: unpackerr_extracted_payload
+
+    - name: Look for the archive Unpackerr extracted it from
+      ansible.builtin.stat:
+        path: "{{ unpackerr_molecule_downloads_path }}/{{ unpackerr_molecule_watch_folder }}/{{ unpackerr_molecule_release_name }}/{{ unpackerr_molecule_release_name }}.zip"
+      register: unpackerr_original_archive
+
+    - name: Assert the operator's data survived the uninstallation
+      ansible.builtin.assert:
+        that:
+          - unpackerr_extracted_payload.stat.exists
+          - unpackerr_extracted_payload.stat.uid == unpackerr_uid | int
+          - unpackerr_original_archive.stat.exists
+        fail_msg: >-
+          The extracted file is {{ 'there' if unpackerr_extracted_payload.stat.exists else 'gone' }} and
+          the archive is {{ 'there' if unpackerr_original_archive.stat.exists else 'gone' }}, so either
+          Unpackerr was never running here - which would make every check below vacuous - or the
+          uninstallation deleted data it promises to leave alone
+        success_msg: >-
+          {{ unpackerr_molecule_extracted_payload_path }} (owned by {{ unpackerr_extracted_payload.stat.uid }})
+          and the archive it came from are still here, so Unpackerr really was running and the
+          uninstallation left the operator's data where it was
+
+    - name: Look for the Unpackerr systemd service file
+      ansible.builtin.stat:
+        path: "{{ unpackerr_molecule_systemd_path }}/unpackerr.service"
+      register: unpackerr_service_file
+
+    - name: Look for the Unpackerr support files
+      ansible.builtin.stat:
+        path: "{{ unpackerr_molecule_base_path }}/{{ item }}"
+      register: unpackerr_support_files
+      loop:
+        - env
+
+    # The base path held nothing but the support files, so the role is
+    # expected to have removed it once they were gone.
+    - name: Look for the Unpackerr base path
+      ansible.builtin.stat:
+        path: "{{ unpackerr_molecule_base_path }}"
+      register: unpackerr_base_path
+
+    # With no state to enforce, this only reports - and a unit whose file is
+    # gone reports LoadState=not-found, which says more than `is-active` would:
+    # systemd no longer knows the unit at all.
+    - name: Ask systemd about the Unpackerr unit
+      ansible.builtin.systemd_service:
+        name: unpackerr.service
+      register: unpackerr_unit
+
+    - name: Ask Docker about the Unpackerr container
+      ansible.builtin.command:
+        cmd: docker ps --all --quiet --filter name=^{{ unpackerr_molecule_container }}$
+      register: unpackerr_container
+      changed_when: false
+
+    - name: Ask Docker about the Unpackerr network
+      ansible.builtin.command:
+        cmd: docker network ls --quiet --filter name=^{{ unpackerr_molecule_network }}$
+      register: unpackerr_network
+      changed_when: false
+
+    - name: Assert Unpackerr removed itself completely
+      ansible.builtin.assert:
+        that:
+          - not unpackerr_service_file.stat.exists
+          - unpackerr_support_files.results | rejectattr('stat.exists') | list | length == 1
+          - not unpackerr_base_path.stat.exists
+          - unpackerr_unit.status.LoadState == 'not-found'
+          - unpackerr_container.stdout | trim | length == 0
+          - unpackerr_network.stdout | trim | length == 0
+        fail_msg: >-
+          Something Unpackerr installed is still here: service file
+          {{ 'present' if unpackerr_service_file.stat.exists else 'gone' }}, support files
+          {{ unpackerr_support_files.results | selectattr('stat.exists') | map(attribute='item') | list }},
+          base path {{ 'present' if unpackerr_base_path.stat.exists else 'gone' }},
+          unit {{ unpackerr_unit.status.LoadState }}/{{ unpackerr_unit.status.ActiveState }},
+          container "{{ unpackerr_container.stdout | trim }}",
+          network "{{ unpackerr_network.stdout | trim }}"
+        success_msg: >-
+          The systemd unit ({{ unpackerr_unit.status.LoadState }}), its service file, the
+          rendered env file, the base path, the container and the container network are all
+          gone
+
+    - name: Show the Unpackerr uninstallation summary
+      ansible.builtin.debug:
+        msg:
+          - "Unpackerr systemd: {{ unpackerr_unit.status.LoadState }}/{{ unpackerr_unit.status.ActiveState }}"
+          - "Unpackerr service file: {{ 'present' if unpackerr_service_file.stat.exists else 'gone' }}"
+          - "Unpackerr base path: {{ 'present' if unpackerr_base_path.stat.exists else 'gone' }}"
+          - "Unpackerr container: {{ unpackerr_container.stdout | trim | default('gone', true) }}"
+          - "Unpackerr network: {{ unpackerr_network.stdout | trim | default('gone', true) }}"
+          - "Unpackerr data kept: {{ unpackerr_molecule_extracted_payload_path }}"

@@ -110,6 +110,9 @@ unpackerr_container_cleanup_command: |
 # Specify the timezone
 unpackerr_environment_variables_tz: "Etc/UTC"
 
+# Control if debug mode is enabled
+unpackerr_environment_variables_un_debug: false
+
 # Additional environment variables.
 #
 # Unpackerr is configured with `UN_*` environment variables (e.g. `UN_SONARR_0_URL`, `UN_RADARR_0_API_KEY`, `UN_FOLDER_0_PATH`, etc.).

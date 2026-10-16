@@ -154,8 +154,5 @@ On startup, Unpackerr logs the settings it is running with, including every Star
 If you want to increase the verbosity, add the following configuration to your `vars.yml` file:
 
 ```yaml
-unpackerr_environment_variables_additional_variables: |
-  UN_DEBUG=true
+unpackerr_environment_variables_un_debug: true
 ```
-
-If you have already defined the variable to connect Unpackerr to Starr apps or to watch folders, add this line to the same variable rather than defining it twice.

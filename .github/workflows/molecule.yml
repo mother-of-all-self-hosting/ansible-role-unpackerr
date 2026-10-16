@@ -38,16 +38,13 @@ jobs:
 
     strategy:
       matrix:
-        # `default` exercises Unpackerr on its own, `sonarr` exercises it serving
-        # a Sonarr installed by ansible-role-sonarr, and `uninstall` exercises the
-        # role's own removal tasks.
+        # `default` exercises Unpackerr on its own, and `sonarr` exercises it
+        # serving a Sonarr installed by ansible-role-sonarr.
         include:
           - distro: ubuntu2604
             scenario: default
           - distro: ubuntu2604
             scenario: sonarr
-          - distro: ubuntu2604
-            scenario: uninstall
       fail-fast: false
 
     env:

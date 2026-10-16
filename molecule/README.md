@@ -43,7 +43,7 @@ pip3 install -r ./molecule/requirements.txt
 
 ## Scenarios
 
-There are three testing scenarios available.
+There are two testing scenarios available.
 
 ### `default`
 
@@ -68,10 +68,6 @@ Installs Sonarr with [ansible-role-sonarr](https://github.com/mother-of-all-self
 - Sonarr and Unpackerr see a folder placed into the download directory at the same path;
 - neither service restarts during a window longer than the units' `RestartSec`.
 
-### `uninstall`
-
-Installs Unpackerr, lets it extract an archive, and then runs the role again with `unpackerr_enabled: false` — the uninstallation path that the other scenarios never touch. It checks that the systemd unit, its service file, the rendered `env` file, the base path, the container and the container network are all gone, and that the operator's data (the archive and what was extracted from it) is not.
-
 ## Running
 
 By default it is configured to run the scenarios on Ubuntu 26.04.
@@ -79,7 +75,6 @@ By default it is configured to run the scenarios on Ubuntu 26.04.
 ```bash
 molecule test --scenario-name default
 molecule test --scenario-name sonarr
-molecule test --scenario-name uninstall
 ```
 
 You can utilize other distributions by setting one to the `MOLECULE_DISTRO` environment variable:

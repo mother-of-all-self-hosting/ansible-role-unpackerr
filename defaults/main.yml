@@ -16,7 +16,7 @@ unpackerr_identifier: unpackerr
 unpackerr_base_path: "/{{ unpackerr_identifier }}"
 
 # renovate: datasource=docker depName=ghcr.io/unpackerr/unpackerr versioning=semver
-unpackerr_version: v0.16.1
+unpackerr_version: v1.0.1
 
 unpackerr_uid: ""
 unpackerr_gid: ""

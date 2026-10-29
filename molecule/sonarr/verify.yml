@@ -235,7 +235,9 @@
         # The same image on the same network, pointed at the same Sonarr, but
         # holding a key Sonarr never issued. Sonarr refusing it is what says the
         # success above is the role's key at work, rather than Sonarr letting
-        # anything on its network in.
+        # anything on its network in. It is also handed the empty listen address
+        # that `unpackerr_webserver_enabled: false` makes the role pass, so it
+        # shows as well that Unpackerr then runs without its web server.
         - name: Read the image the role's Unpackerr container runs
           ansible.builtin.command:
             cmd: docker container inspect --format {% raw %}'{{ .Config.Image }}'{% endraw %} {{ unpackerr_molecule_container }}
@@ -279,6 +281,19 @@
                 success_msg: >-
                   An Unpackerr holding a key Sonarr never issued is refused with 401, so the queue the
                   role's Unpackerr reads is the role's key at work
+
+            - name: Assert an empty listen address turns Unpackerr's web server off
+              ansible.builtin.assert:
+                that:
+                  - "'=> Webserver Disabled' in unpackerr_wrong_key_log.stdout"
+                  - "'Starting webserver' not in unpackerr_wrong_key_log.stdout"
+                  - "'Generated temporary UI password' not in unpackerr_wrong_key_log.stdout"
+                fail_msg: >-
+                  Handed an empty `UN_WEBSERVER_LISTEN_ADDR`, Unpackerr logged
+                  {{ unpackerr_wrong_key_log.stdout_lines | select('search', '(?i)webserver|password') | list }}
+                success_msg: >-
+                  Handed the empty `UN_WEBSERVER_LISTEN_ADDR` that `unpackerr_webserver_enabled: false` makes the
+                  role pass, Unpackerr starts no web server and generates no password
 
           always:
             - name: Remove the wrong-key control

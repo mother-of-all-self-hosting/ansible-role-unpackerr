@@ -68,6 +68,7 @@ Installs Sonarr with [ansible-role-sonarr](https://github.com/mother-of-all-self
 - starting Unpackerr brings Sonarr up with it;
 - Unpackerr reaches Sonarr by its container name and reads its queue with the API key the role handed it, while the same image holding a key Sonarr never issued is refused;
 - the web UI, served without a reverse-proxy in front of it and so without a hostname, lets in the password the role handed to Unpackerr and nothing else, and Unpackerr's API reports reading Sonarr's queue;
+- an Unpackerr handed the empty listen address that `unpackerr_webserver_enabled: false` makes the role pass runs without its web server;
 - the download path Unpackerr looks in is the one the role handed it, rather than the `/downloads` it falls back to on its own;
 - Sonarr and Unpackerr see a folder placed into the download directory at the same path;
 - neither service restarts during a window longer than the units' `RestartSec`.

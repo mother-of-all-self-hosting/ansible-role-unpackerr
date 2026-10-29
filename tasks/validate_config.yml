@@ -33,6 +33,8 @@
       msg: Use `unpackerr_path_prefix` instead.
     - prefix: UN_WEBSERVER_UI_PASSWORD=
       msg: Use `unpackerr_environment_variables_un_webserver_ui_password` instead.
+    - prefix: UN_WEBSERVER_UPSTREAMS=
+      msg: Use `unpackerr_environment_variables_un_webserver_upstreams` instead.
 
 - name: Run if the web UI is enabled
   when: unpackerr_webserver_enabled | bool
@@ -46,6 +48,9 @@
           unpackerr_path_prefix (`{{ unpackerr_path_prefix }}`) must either be `/` or start with a slash and not end with one (e.g. `/unpackerr`).
       when: "unpackerr_path_prefix[:1] != '/' or (unpackerr_path_prefix != '/' and unpackerr_path_prefix[-1] == '/')"
 
+    # Only a plain `username:password` (or a bare password) is held to the minimum. Unpackerr
+    # takes a stored hash (`!!cryptd!!…`), header authentication (`webauth` / `webauth:<header>`),
+    # `noauth` / `noauth:<header>` and `filepath:…` as they are.
     - name: Fail if the Unpackerr web UI password is too short
       ansible.builtin.fail:
         msg: >-
@@ -53,7 +58,7 @@
           Specify it as `username:password` (e.g. `admin:SOME_PASSWORD_HERE`).
       when: >-
         unpackerr_environment_variables_un_webserver_ui_password | length > 0
-        and unpackerr_environment_variables_un_webserver_ui_password is not search('^(!!cryptd!!|webauth|noauth$|filepath:)')
+        and unpackerr_environment_variables_un_webserver_ui_password is not search('^(!!cryptd!!|(webauth|noauth)(:|$)|filepath:)')
         and (unpackerr_environment_variables_un_webserver_ui_password.split(':', 1) | last | length) < 8
 
 - name: Run if Traefik is enabled

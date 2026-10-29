@@ -86,7 +86,7 @@ provisioner:
         # rather than with one Unpackerr generates (which the `default` scenario
         # covers).
         unpackerr_container_labels_traefik_enabled: false
-        unpackerr_container_http_bind_port: 127.0.0.1:5656
+        unpackerr_container_http_host_bind_port: 127.0.0.1:5656
         unpackerr_environment_variables_un_webserver_ui_password: "{{ unpackerr_molecule_ui_user }}:{{ unpackerr_molecule_ui_password }}"
 
         # The wiring docs/configuring-unpackerr.md describes, done through the

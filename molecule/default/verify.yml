@@ -212,7 +212,7 @@
               - unpackerr_container.HostConfig.CapDrop == ['ALL']
               - >-
                 unpackerr_container.HostConfig.PortBindings
-                == {'5656/tcp': [{'HostIp': unpackerr_container_http_bind_port.split(':')[0], 'HostPort': unpackerr_container_http_bind_port.split(':')[1]}]}
+                == {'5656/tcp': [{'HostIp': unpackerr_container_http_host_bind_port.split(':')[0], 'HostPort': unpackerr_container_http_host_bind_port.split(':')[1]}]}
               - unpackerr_molecule_network in unpackerr_container.NetworkSettings.Networks
               - >-
                 (unpackerr_container.Mounts | selectattr('Destination', 'equalto', unpackerr_molecule_downloads_bind_path)
@@ -232,7 +232,7 @@
               {{ unpackerr_container.Mounts | map(attribute='Destination') | zip(unpackerr_container.Mounts | map(attribute='Source')) | list }}
             success_msg: >-
               The container runs as {{ unpackerr_container.Config.User }}, read-only with every capability
-              dropped, publishes its web UI on {{ unpackerr_container_http_bind_port }} only, keeps its config
+              dropped, publishes its web UI on {{ unpackerr_container_http_host_bind_port }} only, keeps its config
               in {{ unpackerr_molecule_data_path }}, and sees {{ unpackerr_molecule_downloads_path }} at
               {{ unpackerr_molecule_downloads_bind_path }}
 

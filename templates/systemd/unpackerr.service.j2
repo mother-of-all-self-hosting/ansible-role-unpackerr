@@ -28,8 +28,8 @@ ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
       --cap-drop=ALL \
       --read-only \
       --network={{ unpackerr_container_network }} \
-      {% if unpackerr_webserver_enabled | bool and unpackerr_container_http_bind_port %}
-      -p {{ unpackerr_container_http_bind_port }}:{{ unpackerr_container_http_port }} \
+      {% if unpackerr_webserver_enabled | bool and unpackerr_container_http_host_bind_port %}
+      -p {{ unpackerr_container_http_host_bind_port }}:{{ unpackerr_container_http_port }} \
       {% endif %}
       --env-file={{ unpackerr_base_path }}/env \
       --label-file={{ unpackerr_base_path }}/labels \

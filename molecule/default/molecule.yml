@@ -82,7 +82,7 @@ provisioner:
         # and keeps it in its config file, as it does by default.
         unpackerr_hostname: unpackerr.example.com
         unpackerr_path_prefix: /unpackerr
-        unpackerr_container_http_bind_port: 127.0.0.1:5656
+        unpackerr_container_http_host_bind_port: 127.0.0.1:5656
 
         # The download directory, mounted the way docs/configuring-unpackerr.md
         # describes.

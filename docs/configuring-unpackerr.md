@@ -32,7 +32,7 @@ See the project's [documentation](https://unpackerr.zip/docs/introduction) to le
 Unpackerr 1.0.0 changed how it is run, and so did this role. If you used the role before, note that:
 
 - **The web UI is enabled by default**, and served at the hostname which you need to set with `unpackerr_hostname` (see [below](#adjusting-the-playbook-configuration)). If you would rather keep running Unpackerr without it, see [this section](#running-unpackerr-without-the-web-ui).
-- Unpackerr now keeps a config file and its extraction history in the directory specified with `unpackerr_data_path` (`/unpackerr/data` by default), which the role mounts into the container. Settings saved on the web UI are written there.
+- Unpackerr now keeps a config file and its extraction history in the directory specified with `unpackerr_data_path` (`/unpackerr/data` by default), which the role mounts into the container. Settings saved on the web UI are written there. If you have set a log file with `UN_LOG_FILE`, Unpackerr keeps the history next to the log file instead.
 - The `UN_*` environment variables you pass with `unpackerr_environment_variables_additional_variables` keep working, but the settings they hold are shown as locked on the web UI. You can keep them, or move the settings to the web UI by removing the variables.
 - **Whisparr is no longer an app of its own.** If you configured it with `UN_WHISPARR_*` variables, configure it as a Radarr instance instead (`UN_RADARR_whisparr_URL`, `UN_RADARR_whisparr_API_KEY`, etc.), as described in the [upgrade guide for Whisparr](https://unpackerr.zip/docs/install/upgrading#whisparr). The role refuses to run with the old variables, as Unpackerr would silently ignore them.
 
@@ -207,7 +207,7 @@ Take a look at:
 Refer to [this page](https://unpackerr.zip/docs/install/configuration) on the documentation for a complete list of Unpackerr's config options that you can put in `unpackerr_environment_variables_additional_variables`.
 
 >[!NOTE]
-> Settings passed as environment variables take precedence over the config file that Unpackerr keeps in `unpackerr_data_path`, and cannot be changed on the web UI. The role always passes `UN_WEBSERVER_LISTEN_ADDR` and `UN_WEBSERVER_URLBASE`, as the reverse-proxy configuration depends on them, so set them with `unpackerr_webserver_enabled` / `unpackerr_container_http_port` and `unpackerr_path_prefix` instead.
+> Settings passed as environment variables take precedence over the config file that Unpackerr keeps in `unpackerr_data_path`, and cannot be changed on the web UI. The role always passes `UN_WEBSERVER_LISTEN_ADDR` and `UN_WEBSERVER_URLBASE`, as the reverse-proxy configuration depends on them, so set them with `unpackerr_webserver_enabled` / `unpackerr_container_http_port` and `unpackerr_path_prefix` instead. The web UI password and the trusted proxies have variables of their own too (`unpackerr_environment_variables_un_webserver_ui_password` and `unpackerr_environment_variables_un_webserver_upstreams`). The role refuses to run if any of these four settings is in `unpackerr_environment_variables_additional_variables`.
 
 ## Installing
 
@@ -246,6 +246,8 @@ systemctl start unpackerr
 ```
 
 The new password for the `admin` user is printed by the `docker run` command.
+
+If you have set the password with `unpackerr_environment_variables_un_webserver_ui_password`, resetting it this way has no effect, as that password is applied every time Unpackerr starts. Change it in your `vars.yml` file instead.
 
 ### Metrics
 

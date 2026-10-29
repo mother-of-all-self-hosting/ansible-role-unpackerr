@@ -19,7 +19,8 @@ unpackerr_base_path: "/{{ unpackerr_identifier }}"
 #
 # Unpackerr writes its config file (`unpackerr.conf`) there on its first start, and keeps in it
 # the web UI password (hashed), its API keys and every setting saved from the web UI.
-# The extraction history (`unpackerr.history.jsonl`) is kept there as well, so that it survives restarts.
+# The extraction history (`unpackerr.history.jsonl`) is kept there as well, so that it survives restarts,
+# unless a log file is set with `UN_LOG_FILE`, in which case Unpackerr keeps the history next to the log file.
 unpackerr_data_path: "{{ unpackerr_base_path }}/data"
 
 # renovate: datasource=docker depName=ghcr.io/unpackerr/unpackerr versioning=semver

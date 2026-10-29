@@ -30,9 +30,9 @@ platforms:
     cgroupns_mode: host
     privileged: true
     pre_build_image: true
-    # Deliberately no published ports. Unpackerr serves nothing over HTTP in
-    # this scenario, and everything the verification looks at is reached from
-    # inside this container.
+    # Deliberately no published ports. The role publishes Unpackerr's HTTP port
+    # on this container's loopback interface, and everything the verification
+    # looks at is reached from inside this container.
 provisioner:
   name: ansible
   config_options:
@@ -60,9 +60,29 @@ provisioner:
         # The folder that Unpackerr watches, inside the download directory.
         unpackerr_molecule_watch_folder: watch
 
+        # The directory the role mounts at /config. It is the role's default,
+        # spelled out because role defaults are not in scope in a verify play.
+        unpackerr_molecule_data_path: /unpackerr/data
+
+        # Where the verification reaches the web UI: the port the role publishes
+        # on the loopback interface, under the path prefix the role hands to
+        # Unpackerr as its URL base.
+        unpackerr_molecule_http_root_url: http://127.0.0.1:5656
+        unpackerr_molecule_http_url: "{{ unpackerr_molecule_http_root_url }}{{ unpackerr_path_prefix }}"
+
         # Variables for Unpackerr
         unpackerr_uid: 1000
         unpackerr_gid: 1000
+
+        # The web UI is served the way a playbook with a Traefik reverse-proxy
+        # would serve it. No Traefik runs in this scenario, so the labels are
+        # only inspected. The path prefix is deliberately not Unpackerr's own
+        # `/`, so that Unpackerr serving the UI under it can only be the role's
+        # doing. The password is left unset, so that Unpackerr generates one
+        # and keeps it in its config file, as it does by default.
+        unpackerr_hostname: unpackerr.example.com
+        unpackerr_path_prefix: /unpackerr
+        unpackerr_container_http_bind_port: 127.0.0.1:5656
 
         # The download directory, mounted the way docs/configuring-unpackerr.md
         # describes.

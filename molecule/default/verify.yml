@@ -34,6 +34,13 @@
     unpackerr_verify_extracted_payload_path: >-
       {{ unpackerr_verify_watch_path }}/{{ unpackerr_verify_release_name }}_unpackerred/{{ unpackerr_verify_release_name }}/{{ unpackerr_verify_payload_name }}
 
+    # What Unpackerr keeps in the directory the role mounts at /config.
+    unpackerr_verify_config_file_path: "{{ unpackerr_molecule_data_path }}/unpackerr.conf"
+    unpackerr_verify_history_file_path: "{{ unpackerr_molecule_data_path }}/unpackerr.history.jsonl"
+
+    # The user Unpackerr generates a password for when it is given none.
+    unpackerr_verify_ui_user: admin
+
     unpackerr_verify_units:
       - unpackerr.service
 
@@ -91,9 +98,9 @@
             name: unpackerr.service
           register: unpackerr_invocation
 
-        # `active` only says a docker client is running. Unpackerr serves nothing
-        # it could be asked about, so the evidence that it is up is what it logs:
-        # it starts watching its folders only after it has read its configuration.
+        # `active` only says a docker client is running. The evidence that Unpackerr
+        # is up is what it logs: it starts watching its folders only after it has
+        # read its configuration and started its web server.
         - name: Wait for Unpackerr to start watching its folder (up to 180s)
           ansible.builtin.command:
             cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
@@ -141,10 +148,10 @@
 
         # With the role's Unpackerr running, this is what says the evidence below
         # means anything. Unpackerr is not an application that falls over when it
-        # is unconfigured: left entirely alone it starts, logs its settings and
-        # idles - so "Unpackerr is running" is worth nothing here on its own, and
-        # every claim below has to rest on a value this control shows Unpackerr
-        # does not choose for itself.
+        # is unconfigured: left entirely alone it starts, logs its settings, serves
+        # its web UI and idles - so "Unpackerr is running" is worth nothing here on
+        # its own, and every claim below has to rest on a value this control shows
+        # Unpackerr does not choose for itself.
         - name: Run the Unpackerr image with none of the role's configuration
           ansible.builtin.command:
             cmd: >-
@@ -159,7 +166,7 @@
               ansible.builtin.command:
                 cmd: "docker logs {{ unpackerr_verify_stock_container }}"
               register: unpackerr_stock_log
-              until: "'Webserver Disabled' in (unpackerr_stock_log.stdout ~ unpackerr_stock_log.stderr)"
+              until: "'No Starr apps or folders configured' in (unpackerr_stock_log.stdout ~ unpackerr_stock_log.stderr)"
               retries: 36
               delay: 5
               changed_when: false
@@ -170,20 +177,22 @@
                   - "'Starting! PID: 1, UID: 0, GID: 0,' in unpackerr_stock_log.stdout"
                   - >-
                     unpackerr_stock_log.stdout is search('Now: [0-9: -]+ \+0000 UTC')
+                  - "'=> Using env variables only. Config file not found.' in unpackerr_stock_log.stdout"
+                  - "'History file disabled' in unpackerr_stock_log.stdout"
                   - "'=> Folder Config: 0 paths' in unpackerr_stock_log.stdout"
                   - "'=> Start/Delete Delay: 1m/' in unpackerr_stock_log.stdout"
-                  - "'No Starr apps or folders configured' in unpackerr_stock_log.stdout"
+                  - "'=> Starting webserver. Listen address: http://0.0.0.0:5656/ (' in unpackerr_stock_log.stdout"
                   - unpackerr_image.Config.User | default('') == ''
                   - unpackerr_image.Config.Volumes | default({}, true) == {}
                 fail_msg: >-
                   Left to itself the Unpackerr image no longer starts the way this scenario
-                  relies on: {{ unpackerr_stock_log.stdout_lines[:10] }}. Those are the values this
+                  relies on: {{ unpackerr_stock_log.stdout_lines[:30] }}. Those are the values this
                   scenario uses as evidence of the role's configuration, so they can no longer
                   be credited to it.
                 success_msg: >-
-                  Left to itself the Unpackerr image runs as root in UTC, watches no folder and
-                  waits a minute before extracting anything - so the opposite of each, below,
-                  is the role's doing
+                  Left to itself the Unpackerr image runs as root in UTC, keeps no config file or
+                  history, watches no folder, waits a minute before extracting anything and serves its
+                  web UI at `/` - so the opposite of each, below, is the role's doing
 
           always:
             - name: Remove the unconfigured Unpackerr
@@ -201,22 +210,52 @@
               - unpackerr_container.Config.User == (unpackerr_uid ~ ':' ~ unpackerr_gid)
               - unpackerr_container.HostConfig.ReadonlyRootfs
               - unpackerr_container.HostConfig.CapDrop == ['ALL']
-              - unpackerr_container.HostConfig.PortBindings | default({}, true) == {}
+              - >-
+                unpackerr_container.HostConfig.PortBindings
+                == {'5656/tcp': [{'HostIp': unpackerr_container_http_bind_port.split(':')[0], 'HostPort': unpackerr_container_http_bind_port.split(':')[1]}]}
               - unpackerr_molecule_network in unpackerr_container.NetworkSettings.Networks
               - >-
                 (unpackerr_container.Mounts | selectattr('Destination', 'equalto', unpackerr_molecule_downloads_bind_path)
                  | map(attribute='Source') | list) == [unpackerr_molecule_downloads_path]
+              - >-
+                (unpackerr_container.Mounts | selectattr('Destination', 'equalto', '/config')
+                 | map(attribute='Source') | list) == [unpackerr_molecule_data_path]
+              - >-
+                (unpackerr_container.Mounts | selectattr('Destination', 'equalto', '/config')
+                 | map(attribute='RW') | list) == [true]
             fail_msg: >-
               The container runs as {{ unpackerr_container.Config.User }} with a
               {{ 'read-only' if unpackerr_container.HostConfig.ReadonlyRootfs else 'writable' }} root filesystem,
               capabilities dropped {{ unpackerr_container.HostConfig.CapDrop }}, publishing
               {{ unpackerr_container.HostConfig.PortBindings }} on networks
               {{ unpackerr_container.NetworkSettings.Networks.keys() | list }}, with mounts
-              {{ unpackerr_container.Mounts | map(attribute='Source') | list }}
+              {{ unpackerr_container.Mounts | map(attribute='Destination') | zip(unpackerr_container.Mounts | map(attribute='Source')) | list }}
             success_msg: >-
               The container runs as {{ unpackerr_container.Config.User }}, read-only with every capability
-              dropped and nothing published, and sees {{ unpackerr_molecule_downloads_path }} at
+              dropped, publishes its web UI on {{ unpackerr_container_http_bind_port }} only, keeps its config
+              in {{ unpackerr_molecule_data_path }}, and sees {{ unpackerr_molecule_downloads_path }} at
               {{ unpackerr_molecule_downloads_bind_path }}
+
+        # No Traefik runs here, so the labels it would route by are what is
+        # checked: the web UI under the role's hostname and path prefix, on the
+        # port Unpackerr listens on.
+        - name: Assert the container carries the labels for Traefik to route to the web UI
+          ansible.builtin.assert:
+            that:
+              - unpackerr_container.Config.Labels['traefik.enable'] | default('') == 'true'
+              - >-
+                unpackerr_container.Config.Labels['traefik.http.routers.' ~ unpackerr_molecule_container ~ '.rule'] | default('')
+                == ('Host(`' ~ unpackerr_hostname ~ '`) && PathPrefix(`' ~ unpackerr_path_prefix ~ '`)')
+              - >-
+                unpackerr_container.Config.Labels['traefik.http.services.' ~ unpackerr_molecule_container ~ '.loadbalancer.server.port'] | default('')
+                == '5656'
+            fail_msg: >-
+              The container carries the labels
+              {{ unpackerr_container.Config.Labels | dict2items | selectattr('key', 'match', 'traefik') | items2dict }}
+            success_msg: >-
+              Traefik would route
+              {{ unpackerr_container.Config.Labels['traefik.http.routers.' ~ unpackerr_molecule_container ~ '.rule'] }}
+              to port 5656 of the container
 
         # ------------------------------------------------------------------
         # The running process is the version this role pins, configured by the role
@@ -239,11 +278,11 @@
               Unpackerr reports "{{ unpackerr_journal.stdout | regex_search('Unpackerr \S+ Starting!') }}"
 
         # Every one of these is a value Unpackerr picks differently when it is left
-        # alone - the control container above showed root, UTC, no folder and a
-        # one-minute start delay. The user arrives through the systemd unit, the
-        # rest only through the env file this role renders and hands to the
-        # container, so Unpackerr reporting them is that file arriving at the
-        # process.
+        # alone - the control container above showed root, UTC, no config file, no
+        # folder, a one-minute start delay and the web UI at `/`. The user arrives
+        # through the systemd unit, the config file through the mount, the rest only
+        # through the env file this role renders and hands to the container, so
+        # Unpackerr reporting them is that file arriving at the process.
         - name: Assert Unpackerr is running the configuration the role rendered
           ansible.builtin.assert:
             that:
@@ -253,19 +292,159 @@
               - >-
                 unpackerr_journal.stdout is search('Now: [0-9: -]+ \+0[23]00 EES?T')
               - unpackerr_environment_variables_tz != 'Etc/UTC'
-              - "'=> Using env variables only. Config file not found.' in unpackerr_journal.stdout"
+              - >-
+                unpackerr_journal.stdout is search('=> (Created new config file|Using Config File): /config/unpackerr\.conf')
+              - "'History file disabled' not in unpackerr_journal.stdout"
               - >-
                 ('=> Folder Config: 1 path: ' ~ unpackerr_verify_watch_bind_path ~ ';') in unpackerr_journal.stdout
               - "'=> Start/Delete Delay: 15s/' in unpackerr_journal.stdout"
               - >-
+                ('=> Starting webserver. Listen address: http://0.0.0.0:5656' ~ unpackerr_path_prefix ~ '/ (0 upstreams) auth:password')
+                in unpackerr_journal.stdout
+              - >-
                 ('[Folder] Watching (fsnotify): ' ~ unpackerr_verify_watch_bind_path) in unpackerr_journal.stdout
             fail_msg: >-
-              Unpackerr started with {{ unpackerr_journal.stdout_lines[:12] }}, which is not what the
-              role's env file says
+              Unpackerr started with {{ unpackerr_journal.stdout_lines[:30] }}, which is not what the
+              role configured
             success_msg: >-
               Unpackerr runs as {{ unpackerr_uid }}:{{ unpackerr_gid }} in {{ unpackerr_environment_variables_tz }},
-              reads nothing but its environment, and watches {{ unpackerr_verify_watch_bind_path }}
-              with a 15s start delay, because the role's rendered env file reached the process
+              keeps its config file in /config, watches {{ unpackerr_verify_watch_bind_path }} with a 15s start
+              delay, and serves its web UI under {{ unpackerr_path_prefix }}/, because the role's mount and
+              rendered env file reached the process
+
+        # ------------------------------------------------------------------
+        # The web UI, under the role's path prefix, behind a password
+        # ------------------------------------------------------------------
+
+        # The role passes no password, so Unpackerr generates one on its first
+        # start, logs it once, and keeps its hash in the config file - which only
+        # survives in the directory the role mounts at /config.
+        - name: Read the config file Unpackerr keeps in the role's data path
+          ansible.builtin.slurp:
+            src: "{{ unpackerr_verify_config_file_path }}"
+          register: unpackerr_config_file_content
+
+        - name: Check the owner of the config file
+          ansible.builtin.stat:
+            path: "{{ unpackerr_verify_config_file_path }}"
+          register: unpackerr_config_file
+
+        - name: Read the temporary password Unpackerr generated
+          ansible.builtin.set_fact:
+            unpackerr_verify_ui_password: >-
+              {{
+                unpackerr_journal.stdout
+                | regex_search('Generated temporary UI password for user ' ~ unpackerr_verify_ui_user ~ ': ([A-Za-z0-9_-]+)', '\1')
+                | default([], true) | first | default('')
+              }}
+
+        - name: Assert Unpackerr generated a password and keeps its hash in the role's data path
+          ansible.builtin.assert:
+            that:
+              - unpackerr_verify_ui_password | length > 0
+              - unpackerr_config_file.stat.uid == unpackerr_uid | int
+              - unpackerr_config_file.stat.gid == unpackerr_gid | int
+              - >-
+                (unpackerr_config_file_content.content | b64decode)
+                is search('(?m)^\s*ui_password = "!!cryptd!!' ~ unpackerr_verify_ui_user ~ ':\$2a\$')
+            fail_msg: >-
+              Unpackerr logged
+              {{ unpackerr_journal.stdout_lines | select('search', 'password') | list }}, and
+              {{ unpackerr_verify_config_file_path }} (owner {{ unpackerr_config_file.stat.uid }}:{{ unpackerr_config_file.stat.gid }})
+              holds
+              {{ (unpackerr_config_file_content.content | b64decode).splitlines() | select('search', 'ui_password') | list }}
+            success_msg: >-
+              Unpackerr generated a temporary password for {{ unpackerr_verify_ui_user }}, and keeps its hash in
+              {{ unpackerr_verify_config_file_path }}, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
+
+        - name: Ask for the web UI under the path prefix
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/"
+            return_content: true
+            status_code: [200]
+          register: unpackerr_web_ui
+
+        - name: Ask for the web UI at the root, where Unpackerr would serve it on its own
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_root_url }}/"
+            status_code: [404]
+          register: unpackerr_web_ui_root
+
+        - name: Ask the API about the system without credentials
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/system"
+            status_code: [401]
+          register: unpackerr_api_anonymous
+
+        # The UI sends the password as this digest (see Unpackerr's DeriveKDF), so
+        # that the plaintext never leaves the browser.
+        - name: Derive the login digests of the generated password and of a wrong one
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import hashlib, sys
+
+                user = sys.argv[1]
+                for password in sys.argv[2:]:
+                    print(hashlib.pbkdf2_hmac('sha256', password.encode(), ('unpackerr:' + user).encode(), 210000, 32).hex())
+              - "{{ unpackerr_verify_ui_user }}"
+              - "{{ unpackerr_verify_ui_password }}"
+              - not-the-generated-password
+          register: unpackerr_verify_kdfs
+          changed_when: false
+
+        - name: Log in with a wrong password
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/auth/login"
+            method: POST
+            body_format: json
+            body:
+              name: "{{ unpackerr_verify_ui_user }}"
+              kdf: "{{ unpackerr_verify_kdfs.stdout_lines[1] }}"
+            status_code: [401]
+          register: unpackerr_login_wrong
+
+        - name: Log in with the generated password
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/auth/login"
+            method: POST
+            body_format: json
+            body:
+              name: "{{ unpackerr_verify_ui_user }}"
+              kdf: "{{ unpackerr_verify_kdfs.stdout_lines[0] }}"
+            status_code: [200]
+          register: unpackerr_login
+
+        - name: Ask the API about the system with the session
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/system"
+            headers:
+              Cookie: "{{ unpackerr_login.cookies_string }}"
+            status_code: [200]
+          register: unpackerr_api_system
+
+        - name: Assert the web UI is served under the path prefix, to the generated password only
+          ansible.builtin.assert:
+            that:
+              - "'text/html' in unpackerr_web_ui.content_type"
+              - unpackerr_web_ui_root.status == 404
+              - unpackerr_api_anonymous.status == 401
+              - unpackerr_login_wrong.status == 401
+              - unpackerr_login.json.username == unpackerr_verify_ui_user
+              - unpackerr_api_system.json.version == (unpackerr_defaults.unpackerr_version | regex_replace('^v', ''))
+              - unpackerr_api_system.json.urlbase == unpackerr_path_prefix ~ '/'
+              - unpackerr_api_system.json.configFile == '/config/unpackerr.conf'
+            fail_msg: >-
+              The web UI answered {{ unpackerr_web_ui.status }} under {{ unpackerr_path_prefix }}/ and
+              {{ unpackerr_web_ui_root.status }} at the root, the API {{ unpackerr_api_anonymous.status }} to an
+              anonymous caller, {{ unpackerr_login_wrong.status }} to a wrong password, and
+              {{ unpackerr_api_system.json | default('nothing') }} to the session
+            success_msg: >-
+              The web UI is served under {{ unpackerr_path_prefix }}/ and nowhere else, turns away anonymous
+              callers and wrong passwords, and lets the generated password in, to an Unpackerr
+              {{ unpackerr_api_system.json.version }} reading {{ unpackerr_api_system.json.configFile }}
 
         # ------------------------------------------------------------------
         # A round trip through the watched folder: an archive in, files out
@@ -365,6 +544,85 @@
               {{ unpackerr_verify_extracted_payload_path }}, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
               and holding exactly what was packed
 
+        # ------------------------------------------------------------------
+        # What Unpackerr keeps in the role's data path survives a restart
+        # ------------------------------------------------------------------
+
+        # Unpackerr records the extraction in its history file, which it writes next
+        # to its config file. It only has a place to keep either because of the
+        # role's mount: the control above showed it keeping neither on its own.
+        - name: Check the history file Unpackerr keeps in the role's data path
+          ansible.builtin.stat:
+            path: "{{ unpackerr_verify_history_file_path }}"
+          register: unpackerr_history_file
+
+        - name: Restart Unpackerr
+          ansible.builtin.systemd_service:
+            name: unpackerr.service
+            state: restarted
+
+        - name: Ask systemd which invocation of Unpackerr is running after the restart
+          ansible.builtin.systemd_service:
+            name: unpackerr.service
+          register: unpackerr_invocation_restarted
+
+        - name: Wait for the restarted Unpackerr to start watching its folder (up to 180s)
+          ansible.builtin.command:
+            cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation_restarted.status.InvocationID }} --no-pager --output cat
+          register: unpackerr_journal_restarted
+          until: "'[Folder] Watching' in unpackerr_journal_restarted.stdout"
+          retries: 36
+          delay: 5
+          changed_when: false
+          failed_when: false
+
+        - name: Log in with the generated password again
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/auth/login"
+            method: POST
+            body_format: json
+            body:
+              name: "{{ unpackerr_verify_ui_user }}"
+              kdf: "{{ unpackerr_verify_kdfs.stdout_lines[0] }}"
+            status_code: [200, 401]
+          register: unpackerr_login_restarted
+
+        - name: Ask the restarted Unpackerr for its queue
+          when: unpackerr_login_restarted.status == 200
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/queue"
+            headers:
+              Cookie: "{{ unpackerr_login_restarted.cookies_string }}"
+            status_code: [200]
+          register: unpackerr_api_queue_restarted
+
+        # An Unpackerr without its config file would generate a new password, and
+        # one without its history would have forgotten the extracted release, which
+        # it keeps in its queue until it is due for cleanup.
+        - name: Assert the restarted Unpackerr kept its password and its history
+          ansible.builtin.assert:
+            that:
+              - unpackerr_invocation_restarted.status.InvocationID != unpackerr_invocation.status.InvocationID
+              - unpackerr_history_file.stat.exists
+              - unpackerr_history_file.stat.uid == unpackerr_uid | int
+              - "'=> Using Config File: /config/unpackerr.conf' in unpackerr_journal_restarted.stdout"
+              - "'Generated temporary UI password' not in unpackerr_journal_restarted.stdout"
+              - unpackerr_journal_restarted.stdout is search('Restored [1-9][0-9]* queue item')
+              - unpackerr_login_restarted.status == 200
+              - >-
+                (unpackerr_api_queue_restarted.json | default([])
+                 | selectattr('path', 'equalto', unpackerr_verify_watch_bind_path ~ '/' ~ unpackerr_verify_release_name)
+                 | map(attribute='status') | list) == ['extracted']
+            fail_msg: >-
+              After the restart, {{ unpackerr_verify_history_file_path }} is
+              {{ 'there' if unpackerr_history_file.stat.exists else 'missing' }}, Unpackerr logged
+              {{ unpackerr_journal_restarted.stdout_lines[:12] }}, answered {{ unpackerr_login_restarted.status }}
+              to the generated password, and holds the queue {{ unpackerr_api_queue_restarted.json | default('nothing') }}
+            success_msg: >-
+              After the restart Unpackerr read its config file back, still lets the generated password in, and
+              still knows it extracted {{ unpackerr_verify_release_name }}, from what it keeps in
+              {{ unpackerr_molecule_data_path }}
+
         - name: Verify nothing was quietly restarting while all of that was being checked
           when: "unpackerr_restarts_check_enabled | bool"
           block:
@@ -411,7 +669,9 @@
               - "Unpackerr restarts: {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | default([]) | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}"
               - "Unpackerr version: {{ unpackerr_journal.stdout | regex_search('Unpackerr \\S+ Starting!') }} from {{ unpackerr_container.Config.Image }}"
               - "Unpackerr container: user {{ unpackerr_container.Config.User }}, read-only {{ unpackerr_container.HostConfig.ReadonlyRootfs }}, capabilities dropped {{ unpackerr_container.HostConfig.CapDrop }}"
+              - "Unpackerr web UI: {{ unpackerr_molecule_http_url }}/ ({{ unpackerr_web_ui.status }}), API system {{ unpackerr_api_system.json.version }}"
               - "Unpackerr extracted: {{ unpackerr_verify_extracted_payload_path }} (owner {{ unpackerr_extracted_payload.stat.uid }}:{{ unpackerr_extracted_payload.stat.gid }})"
+              - "Unpackerr data path: {{ unpackerr_verify_config_file_path }}, {{ unpackerr_verify_history_file_path }}"
 
       rescue:
         # Whatever went wrong, the reason is almost always in the systemd service log.

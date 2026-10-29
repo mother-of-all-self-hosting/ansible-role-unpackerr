@@ -125,7 +125,7 @@
           ansible.builtin.command:
             cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
           register: unpackerr_journal
-          until: ('[Sonarr] Updated (' ~ unpackerr_molecule_sonarr_url ~ ')') in unpackerr_journal.stdout
+          until: "'[Sonarr] Updated: ' in unpackerr_journal.stdout"
           retries: 36
           delay: 5
           changed_when: false
@@ -143,14 +143,94 @@
                 ('=> Sonarr Config: 1 server: ' ~ unpackerr_molecule_sonarr_url ~ ', apikey:true,') in unpackerr_journal.stdout
               - >-
                 ('paths:["' ~ unpackerr_molecule_downloads_bind_path ~ '"]') in unpackerr_journal.stdout
-              - >-
-                ('[Sonarr] Updated (' ~ unpackerr_molecule_sonarr_url ~ '): ') in unpackerr_journal.stdout
+              - "'[Sonarr] Updated: ' in unpackerr_journal.stdout"
             fail_msg: >-
               Unpackerr did not read Sonarr's queue:
               {{ unpackerr_journal.stdout_lines | select('search', 'Sonarr') | list }}
             success_msg: >-
               Unpackerr reaches Sonarr at {{ unpackerr_molecule_sonarr_url }}, reads its queue with the
               API key the role handed it, and looks for downloads in {{ unpackerr_molecule_downloads_bind_path }}
+
+        # ------------------------------------------------------------------
+        # The web UI lets in the password the role handed to Unpackerr
+        # ------------------------------------------------------------------
+
+        # The UI sends the password as this digest (see Unpackerr's DeriveKDF), so
+        # that the plaintext never leaves the browser.
+        - name: Derive the login digests of the role's password and of a wrong one
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import hashlib, sys
+
+                user = sys.argv[1]
+                for password in sys.argv[2:]:
+                    print(hashlib.pbkdf2_hmac('sha256', password.encode(), ('unpackerr:' + user).encode(), 210000, 32).hex())
+              - "{{ unpackerr_molecule_ui_user }}"
+              - "{{ unpackerr_molecule_ui_password }}"
+              - not-the-role-password
+          register: unpackerr_verify_kdfs
+          changed_when: false
+
+        - name: Log in to the web UI with a wrong password
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/auth/login"
+            method: POST
+            body_format: json
+            body:
+              name: "{{ unpackerr_molecule_ui_user }}"
+              kdf: "{{ unpackerr_verify_kdfs.stdout_lines[1] }}"
+            status_code: [401]
+          register: unpackerr_login_wrong
+
+        - name: Log in to the web UI with the role's password
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/auth/login"
+            method: POST
+            body_format: json
+            body:
+              name: "{{ unpackerr_molecule_ui_user }}"
+              kdf: "{{ unpackerr_verify_kdfs.stdout_lines[0] }}"
+            status_code: [200]
+          register: unpackerr_login
+
+        # The statistics name every Starr app by its URL, along with when its
+        # queue was last read or why it could not be - which the log line above
+        # no longer says.
+        - name: Ask Unpackerr's API for its statistics with the session
+          ansible.builtin.uri:
+            url: "{{ unpackerr_molecule_http_url }}/api/stats"
+            headers:
+              Cookie: "{{ unpackerr_login.cookies_string }}"
+            status_code: [200]
+          register: unpackerr_api_stats
+
+        - name: Assert the role's password logs in, and Unpackerr reports reading Sonarr's queue
+          ansible.builtin.assert:
+            that:
+              - "'UN_WEBSERVER_UI_PASSWORD is set' in unpackerr_journal.stdout"
+              - "'Generated temporary UI password' not in unpackerr_journal.stdout"
+              - unpackerr_login_wrong.status == 401
+              - unpackerr_login.json.username == unpackerr_molecule_ui_user
+              - >-
+                (unpackerr_api_stats.json.starrQueues | default([])
+                 | selectattr('url', 'equalto', unpackerr_molecule_sonarr_url) | list | length) == 1
+              - >-
+                (unpackerr_api_stats.json.starrQueues | default([])
+                 | selectattr('url', 'equalto', unpackerr_molecule_sonarr_url) | first).updatedAt is defined
+              - >-
+                (unpackerr_api_stats.json.starrQueues | default([])
+                 | selectattr('url', 'equalto', unpackerr_molecule_sonarr_url) | first).error is not defined
+            fail_msg: >-
+              The web UI answered {{ unpackerr_login_wrong.status }} to a wrong password and
+              {{ unpackerr_login.status }} to the role's, and Unpackerr reports the Starr queues
+              {{ unpackerr_api_stats.json.starrQueues | default('nothing') }}
+            success_msg: >-
+              The web UI lets in the password the role handed to Unpackerr and nothing else, and Unpackerr
+              reports reading the queue of {{ unpackerr_molecule_sonarr_url }}
+              ({{ (unpackerr_api_stats.json.starrQueues | selectattr('url', 'equalto', unpackerr_molecule_sonarr_url) | first).updatedAt }})
 
         # The same image on the same network, pointed at the same Sonarr, but
         # holding a key Sonarr never issued. Sonarr refusing it is what says the
@@ -171,6 +251,7 @@
               --env UN_INTERVAL=15s
               --env UN_SONARR_0_URL={{ unpackerr_molecule_sonarr_url }}
               --env UN_SONARR_0_API_KEY={{ unpackerr_verify_wrong_api_key }}
+              --env UN_WEBSERVER_LISTEN_ADDR=
               {{ unpackerr_running_image.stdout | trim }}
           changed_when: true
 
@@ -189,7 +270,8 @@
               ansible.builtin.assert:
                 that:
                   - >-
-                    ('Sonarr (' ~ unpackerr_molecule_sonarr_url ~ '): api.Get(v3/queue): invalid status code, 401') in unpackerr_wrong_key_log.stdout
+                    ('=> Sonarr Config: 1 server: ' ~ unpackerr_molecule_sonarr_url ~ ', apikey:true,') in unpackerr_wrong_key_log.stdout
+                  - "'Sonarr: getting queue: api.Get(v3/queue): invalid status code, 401' in unpackerr_wrong_key_log.stdout"
                   - "'[Sonarr] Updated' not in unpackerr_wrong_key_log.stdout"
                 fail_msg: >-
                   An Unpackerr holding a key Sonarr never issued logged
@@ -293,6 +375,7 @@
               - "systemd: {% for unit, state in unpackerr_verify_units | zip(unpackerr_services.results | map(attribute='status.ActiveState')) %}{{ unit }} ({{ state }}){% if not loop.last %}, {% endif %}{% endfor %}"
               - "Sonarr: {{ unpackerr_sonarr_status.json.version }}, queue {{ unpackerr_sonarr_queue.json.totalRecords }} items, anonymous {{ unpackerr_sonarr_anonymous_queue.status }}"
               - "Unpackerr: {{ unpackerr_journal.stdout_lines | select('search', '\\[Sonarr\\] Updated') | first }}"
+              - "Unpackerr web UI: logged in as {{ unpackerr_login.json.username }}, Starr queues {{ unpackerr_api_stats.json.starrQueues }}"
               - "Wrong key: {{ unpackerr_wrong_key_log.stdout_lines | select('search', '401') | first }}"
 
       rescue:

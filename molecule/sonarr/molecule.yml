@@ -69,9 +69,25 @@ provisioner:
         # could be configured.
         unpackerr_molecule_sonarr_api_key: 6d6f6c6563756c652d736f6e61727221
 
+        # Where the verification reaches Unpackerr's web UI and API: the port the
+        # role publishes on the loopback interface.
+        unpackerr_molecule_http_url: http://127.0.0.1:5656
+
+        # The web UI password the role hands to Unpackerr.
+        unpackerr_molecule_ui_user: admin
+        unpackerr_molecule_ui_password: molecule-unpackerr-password
+
         # Variables for Unpackerr
         unpackerr_uid: 1000
         unpackerr_gid: 1000
+
+        # The web UI without a reverse-proxy in front of it, and so without a
+        # hostname, logged in to with a password the role hands to Unpackerr
+        # rather than with one Unpackerr generates (which the `default` scenario
+        # covers).
+        unpackerr_container_labels_traefik_enabled: false
+        unpackerr_container_http_bind_port: 127.0.0.1:5656
+        unpackerr_environment_variables_un_webserver_ui_password: "{{ unpackerr_molecule_ui_user }}:{{ unpackerr_molecule_ui_password }}"
 
         # The wiring docs/configuring-unpackerr.md describes, done through the
         # `_auto` variables the way a playbook integrating both roles would do it:

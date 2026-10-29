@@ -14,6 +14,7 @@
     group: "{{ unpackerr_gid }}"
   with_items:
     - "{{ unpackerr_base_path }}"
+    - "{{ unpackerr_data_path }}"
 
 - name: Ensure Unpackerr support files installed
   ansible.builtin.template:
@@ -24,6 +25,7 @@
     group: "{{ unpackerr_gid }}"
   with_items:
     - env
+    - labels
   register: unpackerr_support_files_result
 
 - name: Ensure Unpackerr container image is pulled via community.docker.docker_image_pull

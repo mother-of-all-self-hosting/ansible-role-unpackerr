@@ -13,3 +13,70 @@
     - unpackerr_uid
     - unpackerr_gid
     - unpackerr_container_network
+
+# Unpackerr ignores what it no longer knows, rather than refusing to start, so these
+# would otherwise silently stop working. The role-managed `UN_WEBSERVER_*` variables
+# would override the ones this role passes, as later lines win in an env file.
+- name: Fail if Unpackerr environment variables are no longer supported or are managed by the role
+  ansible.builtin.fail:
+    msg: >-
+      `unpackerr_environment_variables_additional_variables` contains `{{ item.prefix }}…`. {{ item.msg }}
+  when: "unpackerr_environment_variables_additional_variables is search('(?m)^[ \\t]*' ~ item.prefix)"
+  with_items:
+    - prefix: UN_WHISPARR_
+      msg: >-
+        Unpackerr v1 no longer has a Whisparr app of its own. Configure Whisparr as a Radarr instance instead,
+        renaming `UN_WHISPARR_0_*` to `UN_RADARR_whisparr_*` (e.g. `UN_RADARR_whisparr_URL`) and adding `UN_RADARR_whisparr_NAME=Whisparr`.
+    - prefix: UN_WEBSERVER_LISTEN_ADDR=
+      msg: Use `unpackerr_webserver_enabled` and `unpackerr_container_http_port` instead.
+    - prefix: UN_WEBSERVER_URLBASE=
+      msg: Use `unpackerr_path_prefix` instead.
+    - prefix: UN_WEBSERVER_UI_PASSWORD=
+      msg: Use `unpackerr_environment_variables_un_webserver_ui_password` instead.
+
+- name: Run if the web UI is enabled
+  when: unpackerr_webserver_enabled | bool
+  block:
+    # We ensure it doesn't end with a slash, because we handle both (slash and no-slash).
+    # Knowing that `unpackerr_path_prefix` does not end with a slash ensures we know how to set
+    # these routes up without having to do "does it end with a slash" checks elsewhere.
+    - name: Fail if unpackerr_path_prefix is not `/` or a path not ending with a slash
+      ansible.builtin.fail:
+        msg: >-
+          unpackerr_path_prefix (`{{ unpackerr_path_prefix }}`) must either be `/` or start with a slash and not end with one (e.g. `/unpackerr`).
+      when: "unpackerr_path_prefix[:1] != '/' or (unpackerr_path_prefix != '/' and unpackerr_path_prefix[-1] == '/')"
+
+    - name: Fail if the Unpackerr web UI password is too short
+      ansible.builtin.fail:
+        msg: >-
+          The password in `unpackerr_environment_variables_un_webserver_ui_password` must be at least 8 characters long.
+          Specify it as `username:password` (e.g. `admin:SOME_PASSWORD_HERE`).
+      when: >-
+        unpackerr_environment_variables_un_webserver_ui_password | length > 0
+        and unpackerr_environment_variables_un_webserver_ui_password is not search('^(!!cryptd!!|webauth|noauth$|filepath:)')
+        and (unpackerr_environment_variables_un_webserver_ui_password.split(':', 1) | last | length) < 8
+
+- name: Run if Traefik is enabled
+  when: unpackerr_webserver_enabled | bool and unpackerr_container_labels_traefik_enabled | bool
+  block:
+    - name: Fail if the hostname for the Unpackerr web UI is not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`unpackerr_hostname`), the hostname to serve the Unpackerr web UI at.
+          If you would rather run Unpackerr without its web UI, set `unpackerr_webserver_enabled: false` instead.
+      when: "unpackerr_container_labels_traefik_hostname | string | length == 0"
+
+    - name: Fail if Traefik settings required for Unpackerr are not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`{{ item.name }}`).
+      when: "item.when | bool and lookup('vars', item.name, default='') | string | length == 0"
+      with_items:
+        - { "name": "unpackerr_container_labels_traefik_path_prefix", when: true }
+        - { "name": "unpackerr_container_labels_traefik_middleware_basic_auth_users", when: "{{ unpackerr_container_labels_traefik_middleware_basic_auth_enabled }}" }
+
+    - name: Fail if unpackerr_container_labels_traefik_path_prefix ends with a slash
+      ansible.builtin.fail:
+        msg: >-
+          unpackerr_container_labels_traefik_path_prefix (`{{ unpackerr_container_labels_traefik_path_prefix }}`) must either be `/` or not end with a slash (e.g. `/unpackerr`).
+      when: "unpackerr_container_labels_traefik_path_prefix != '/' and unpackerr_container_labels_traefik_path_prefix[-1] == '/'"

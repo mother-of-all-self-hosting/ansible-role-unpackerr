@@ -15,11 +15,33 @@ unpackerr_enabled: true
 unpackerr_identifier: unpackerr
 unpackerr_base_path: "/{{ unpackerr_identifier }}"
 
+# The directory mounted into the container at `/config`.
+#
+# Unpackerr writes its config file (`unpackerr.conf`) there on its first start, and keeps in it
+# the web UI password (hashed), its API keys and every setting saved from the web UI.
+# The extraction history (`unpackerr.history.jsonl`) is kept there as well, so that it survives restarts,
+# unless a log file is set with `UN_LOG_FILE`, in which case Unpackerr keeps the history next to the log file.
+unpackerr_data_path: "{{ unpackerr_base_path }}/data"
+
 # renovate: datasource=docker depName=ghcr.io/unpackerr/unpackerr versioning=semver
-unpackerr_version: v0.16.1
+unpackerr_version: v1.0.1
 
 unpackerr_uid: ""
 unpackerr_gid: ""
+
+# Controls whether Unpackerr's HTTP server, which serves its web UI and API, is enabled.
+#
+# When disabled, Unpackerr runs in the background without a web UI, configured only
+# through its `UN_*` environment variables (see `unpackerr_environment_variables_additional_variables`).
+unpackerr_webserver_enabled: true
+
+# The hostname at which Unpackerr's web UI is served.
+# Required when the web UI is enabled and exposed via Traefik (see `unpackerr_container_labels_traefik_enabled`).
+unpackerr_hostname: ""
+
+# The path at which Unpackerr's web UI is served.
+# This value must either be `/` or not end with a slash (e.g. `/unpackerr`).
+unpackerr_path_prefix: /
 
 unpackerr_container_image: "{{ unpackerr_container_image_registry_prefix }}unpackerr/unpackerr:{{ unpackerr_container_image_tag }}"
 unpackerr_container_image_tag: "{{ unpackerr_version }}"
@@ -33,10 +55,19 @@ unpackerr_container_network: "{{ unpackerr_identifier }}"
 # Control if the container network is deleted on uninstalling.
 unpackerr_container_network_deletion_enabled: true
 
+# Specify how the container publishes its HTTP port (as defined by `unpackerr_container_http_port`).
+#
+# Takes an "<ip>:<port>" or "<port>" value (e.g. "127.0.0.1:5656"), or empty string to not expose.
+unpackerr_container_http_host_bind_port: ""
+
+# The port Unpackerr's HTTP server listens on in the container
+unpackerr_container_http_port: 5656
+
 # A list of additional container networks that the container would be connected to.
 # The role does not create these networks, so make sure they already exist.
 # Use this to let Unpackerr reach Sonarr, Radarr, etc., which run in a different container network.
-unpackerr_container_additional_networks: "{{ unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom }}"
+unpackerr_container_additional_networks: "{{ (unpackerr_container_additional_networks_default + unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom) | unique }}"
+unpackerr_container_additional_networks_default: []
 unpackerr_container_additional_networks_auto: []
 unpackerr_container_additional_networks_custom: []
 
@@ -52,6 +83,57 @@ unpackerr_container_additional_volumes: "{{ unpackerr_container_additional_volum
 unpackerr_container_additional_volumes_auto: []
 unpackerr_container_additional_volumes_custom: []
 
+# unpackerr_container_labels_traefik_enabled controls whether labels to assist a Traefik reverse-proxy will be attached to the container.
+# Labels are only attached while the web UI is enabled (see `unpackerr_webserver_enabled`).
+# See `../templates/labels.j2` for details.
+#
+# To inject your own other container labels, see `unpackerr_container_labels_additional_labels_custom`.
+unpackerr_container_labels_traefik_enabled: true
+unpackerr_container_labels_traefik_docker_network: "{{ unpackerr_container_network }}"
+unpackerr_container_labels_traefik_hostname: "{{ unpackerr_hostname }}"
+# The path prefix must either be `/` or not end with a slash (e.g. `/unpackerr`).
+unpackerr_container_labels_traefik_path_prefix: "{{ unpackerr_path_prefix }}"
+unpackerr_container_labels_traefik_rule: "Host(`{{ unpackerr_container_labels_traefik_hostname }}`){% if unpackerr_container_labels_traefik_path_prefix != '/' %} && PathPrefix(`{{ unpackerr_container_labels_traefik_path_prefix }}`){% endif %}"
+unpackerr_container_labels_traefik_priority: 0
+unpackerr_container_labels_traefik_entrypoints: web-secure
+unpackerr_container_labels_traefik_tls: "{{ unpackerr_container_labels_traefik_entrypoints != 'web' }}"
+unpackerr_container_labels_traefik_tls_certResolver: default # noqa var-naming
+unpackerr_container_labels_traefik_middleware_basic_auth_enabled: false
+# See: https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/basicauth/
+unpackerr_container_labels_traefik_middleware_basic_auth_users: ""
+
+# Controls which additional headers to attach to all HTTP requests.
+# To add your own custom request headers, use `unpackerr_container_labels_traefik_additional_request_headers_custom`
+unpackerr_container_labels_traefik_additional_request_headers: "{{ unpackerr_container_labels_traefik_additional_request_headers_auto | combine(unpackerr_container_labels_traefik_additional_request_headers_custom) }}"
+unpackerr_container_labels_traefik_additional_request_headers_auto: {}
+unpackerr_container_labels_traefik_additional_request_headers_custom: {}
+
+# Controls which additional headers to attach to all HTTP responses.
+# To add your own custom response headers, use `unpackerr_container_labels_traefik_additional_response_headers_custom`
+unpackerr_container_labels_traefik_additional_response_headers: "{{ unpackerr_container_labels_traefik_additional_response_headers_auto | combine(unpackerr_container_labels_traefik_additional_response_headers_custom) }}"
+unpackerr_container_labels_traefik_additional_response_headers_auto: |
+  {{
+    {}
+    | combine ({'X-XSS-Protection': unpackerr_http_header_xss_protection} if unpackerr_http_header_xss_protection else {})
+    | combine ({'X-Content-Type-Options': unpackerr_http_header_content_type_options} if unpackerr_http_header_content_type_options else {})
+    | combine ({'Content-Security-Policy': unpackerr_http_header_content_security_policy} if unpackerr_http_header_content_security_policy else {})
+    | combine ({'Permissions-Policy': unpackerr_http_header_permissions_policy} if unpackerr_http_header_permissions_policy else {})
+    | combine ({'Strict-Transport-Security': unpackerr_http_header_strict_transport_security} if unpackerr_http_header_strict_transport_security and unpackerr_container_labels_traefik_tls else {})
+  }}
+unpackerr_container_labels_traefik_additional_response_headers_custom: {}
+
+# unpackerr_container_labels_additional_labels contains a list of additional labels to add to the container label file.
+# See `../templates/labels.j2` for details.
+# To add your own custom labels, use `unpackerr_container_labels_additional_labels_custom`
+#
+# Example:
+# unpackerr_container_labels_additional_labels_custom:
+#   - my.label=1
+#   - another.label="here"
+unpackerr_container_labels_additional_labels: "{{ unpackerr_container_labels_additional_labels_auto + unpackerr_container_labels_additional_labels_custom }}"
+unpackerr_container_labels_additional_labels_auto: []
+unpackerr_container_labels_additional_labels_custom: []
+
 # A list of extra arguments to pass to the container (`docker create` command)
 unpackerr_container_extra_arguments: "{{ unpackerr_container_extra_arguments_auto + unpackerr_container_extra_arguments_custom }}"
 unpackerr_container_extra_arguments_auto: []
@@ -63,14 +145,61 @@ unpackerr_process_extra_arguments: "{{ unpackerr_process_extra_arguments_auto + 
 unpackerr_process_extra_arguments_auto: []
 unpackerr_process_extra_arguments_custom: []
 
+# Specifies the value of the `X-XSS-Protection` header
+# Stops pages from loading when they detect reflected cross-site scripting (XSS) attacks.
+#
+# Learn more about it is here:
+# - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-XSS-Protection
+# - https://portswigger.net/web-security/cross-site-scripting/reflected
+unpackerr_http_header_xss_protection: "1; mode=block"
+
+# Specifies the value of the `X-Content-Type-Options` header.
+# See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options
+unpackerr_http_header_content_type_options: nosniff
+
+# Specifies the value of the `Content-Security-Policy` header.
+# See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
+unpackerr_http_header_content_security_policy: frame-ancestors 'self'
+
+# Specifies the value of the `Permissions-Policy` header.
+# See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy
+unpackerr_http_header_permissions_policy: "{{ 'interest-cohort=()' if unpackerr_floc_optout_enabled else '' }}"
+
+# Specifies the value of the `Strict-Transport-Security` header.
+# See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security
+unpackerr_http_header_strict_transport_security: "max-age=31536000; includeSubDomains{{ '; preload' if unpackerr_hsts_preload_enabled else '' }}"
+
+# Controls whether to send a "Permissions-Policy interest-cohort=();" header along with all responses
+#
+# Learn more about what it is here:
+# - https://www.eff.org/deeplinks/2021/03/googles-floc-terrible-idea
+# - https://paramdeo.com/blog/opting-your-website-out-of-googles-floc-network
+# - https://amifloced.org/
+#
+# Of course, a better solution is to just stop using browsers (like Chrome), which participate in such tracking practices.
+# See: `unpackerr_http_header_permissions_policy`
+unpackerr_floc_optout_enabled: true
+
+# Controls if HSTS preloading is enabled
+#
+# In its strongest and recommended form, the [HSTS policy](https://www.chromium.org/hsts) includes all subdomains, and
+# indicates a willingness to be "preloaded" into browsers:
+# `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
+# For more information visit:
+# - https://en.wikipedia.org/wiki/HTTP_Strict_Transport_Security
+# - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security
+# - https://hstspreload.org/#opt-in
+# See: `unpackerr_http_header_strict_transport_security`
+unpackerr_hsts_preload_enabled: false
+
 # List of systemd services that the Unpackerr systemd service depends on
-unpackerr_systemd_required_services_list: "{{ unpackerr_systemd_required_services_list_default + unpackerr_systemd_required_services_list_auto + unpackerr_systemd_required_services_list_custom }}"
+unpackerr_systemd_required_services_list: "{{ (unpackerr_systemd_required_services_list_default + unpackerr_systemd_required_services_list_auto + unpackerr_systemd_required_services_list_custom) | unique }}"
 unpackerr_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
 unpackerr_systemd_required_services_list_auto: []
 unpackerr_systemd_required_services_list_custom: []
 
 # List of systemd services that the Unpackerr systemd service wants
-unpackerr_systemd_wanted_services_list: "{{ unpackerr_systemd_wanted_services_list_default + unpackerr_systemd_wanted_services_list_auto + unpackerr_systemd_wanted_services_list_custom }}"
+unpackerr_systemd_wanted_services_list: "{{ (unpackerr_systemd_wanted_services_list_default + unpackerr_systemd_wanted_services_list_auto + unpackerr_systemd_wanted_services_list_custom) | unique }}"
 unpackerr_systemd_wanted_services_list_default: []
 unpackerr_systemd_wanted_services_list_auto: []
 unpackerr_systemd_wanted_services_list_custom: []
@@ -112,10 +241,38 @@ unpackerr_environment_variables_tz: "Etc/UTC"
 # Control if debug mode is enabled
 unpackerr_environment_variables_un_debug: false
 
+# The address Unpackerr's HTTP server listens on. An empty value disables the HTTP server.
+# Controlled by `unpackerr_webserver_enabled` and `unpackerr_container_http_port`.
+unpackerr_environment_variables_un_webserver_listen_addr: "{{ ('0.0.0.0:' ~ unpackerr_container_http_port) if unpackerr_webserver_enabled | bool else '' }}"
+
+# The path the web UI and API are served at. It has to match the path the reverse-proxy serves them at.
+unpackerr_environment_variables_un_webserver_urlbase: "{{ unpackerr_path_prefix }}"
+
+# The web UI login, as `username:password` (e.g. `admin:SOME_PASSWORD_HERE`, with a password of at least 8 characters).
+#
+# When empty (the default), the role does not pass this variable to Unpackerr at all.
+# Unpackerr then generates a temporary password for the `admin` user on its first start, logs it once,
+# and keeps the password (hashed) in its config file in `unpackerr_data_path`, where changing it in the web UI persists it.
+#
+# When set, the password is applied on every start and cannot be changed from the web UI.
+# Unpackerr also accepts the other forms its `ui_password` setting takes, such as `webauth:X-Webauth-User`
+# for authentication by a reverse-proxy header. See: https://unpackerr.zip/docs/install/web-ui
+unpackerr_environment_variables_un_webserver_ui_password: ""
+
+# A list of IP addresses or CIDR ranges of reverse-proxies that Unpackerr trusts
+# for the `X-Forwarded-For` and `X-Forwarded-Proto` headers (e.g. `["172.16.0.0/12"]`).
+#
+# Trusted proxies get secure cookies over HTTPS and the real client address in logs, and are the only ones
+# allowed to use header authentication (`webauth:…`) and `noauth`.
+unpackerr_environment_variables_un_webserver_upstreams: []
+
 # Additional environment variables.
 #
 # Unpackerr is configured with `UN_*` environment variables (e.g. `UN_SONARR_0_URL`, `UN_RADARR_0_API_KEY`, `UN_FOLDER_0_PATH`, etc.).
 # See: https://unpackerr.zip/docs/install/configuration
+#
+# A setting passed as an environment variable overrides the config file, and is shown as locked in the web UI.
+# Settings which are not passed here can be changed from the web UI instead.
 #
 # Example:
 # unpackerr_environment_variables_additional_variables: |

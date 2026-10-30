@@ -31,6 +31,14 @@
         state: absent
       with_items:
         - env
+        - labels
+
+    - name: Ensure Unpackerr data path does not exist if empty
+      ansible.builtin.command:
+        cmd: "rmdir {{ unpackerr_data_path }}"
+      register: unpackerr_data_path_deletion_result
+      changed_when: unpackerr_data_path_deletion_result.rc == 0
+      failed_when: false
 
     - name: Ensure Unpackerr base path does not exist if empty
       ansible.builtin.command:
@@ -57,3 +65,22 @@
               {{ unpackerr_container_network }}
           register: unpackerr_network_deletion_result
           changed_when: unpackerr_container_network in unpackerr_network_deletion_result.stdout
+
+- name: Check existence of Unpackerr data path
+  ansible.builtin.stat:
+    path: "{{ unpackerr_data_path }}"
+  register: unpackerr_data_path_stat
+
+# We just want to notify the user. Deleting the config file (with the settings saved
+# from the web UI) and the extraction history is too destructive.
+- name: Inject the message about the remaining Unpackerr data path
+  when: unpackerr_data_path_stat.stat.exists | bool
+  ansible.builtin.set_fact:
+    devture_playbook_runtime_messages_list: |
+      {{
+        devture_playbook_runtime_messages_list | default([])
+        +
+        [
+          "Note: As the Unpackerr instance has been removed, its config file and extraction history remain in `" + unpackerr_data_path + "`. Feel free to delete them."
+        ]
+      }}

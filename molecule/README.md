@@ -43,18 +43,30 @@ pip3 install -r ./molecule/requirements.txt
 
 ## Scenarios
 
-There are two testing scenarios available.
+There are three testing scenarios available.
 
 ### `default`
 
 Tests a standard Unpackerr installation, and is where the substance of the suite lives.
 
-It first runs the same container image with none of the role's configuration, to establish what an Unpackerr that nobody configured chooses for itself — it starts happily and idles, so nothing else in the scenario is allowed to rest on Unpackerr merely running. The scenario then checks that:
+It first runs the same container image with none of the role's configuration, to establish what an Unpackerr that nobody configured chooses for itself — it starts happily, serves its web UI and idles, so nothing else in the scenario is allowed to rest on Unpackerr merely running. The scenario then checks that:
 
-- the container runs as the configured user, read-only with every capability dropped and nothing published, and sees the download directory at the path the role mounts it at;
+- the container runs as the configured user, read-only with every capability dropped, publishes its web UI only on the port the role was asked to, keeps its config in the role's data path, and sees the download directory at the path the role mounts it at;
+- the container carries the labels for Traefik to route the role's hostname and path prefix to the web UI;
 - the running process reports the version `unpackerr_version` pins, matching the image tag and the image's OCI version label;
-- the user, timezone, watched folder and start delay Unpackerr is running with are the ones the role configured — all of them deliberately different from what Unpackerr picks for itself — and it reads nothing but its environment;
+- the user, timezone, config file, watched folder, start delay and web UI path Unpackerr is running with are the ones the role configured — all of them deliberately different from what Unpackerr picks for itself;
+- Unpackerr generates a password for its web UI and keeps its hash in the role's data path, and the web UI is served under the path prefix only, turning away anonymous callers and wrong passwords while letting the generated password in;
 - a release folder holding an archive, moved into the watched folder, is extracted into a new folder next to it, as files owned by the role's user holding exactly what was packed;
+- after a restart, Unpackerr reads its config file back, still lets the generated password in, and still knows about the extracted release from its history;
+- the service does not restart during a window longer than the unit's `RestartSec`.
+
+### `headless`
+
+Installs Unpackerr with `unpackerr_webserver_enabled: false` and nothing else an existing installation would have to add: no hostname, with the Traefik labels left enabled and a port asked to be published. Installing at all shows that the role does not require a hostname for a web UI it does not serve. The scenario then checks that:
+
+- the container publishes no port, carries no labels for Traefik, and is handed an empty listen address;
+- Unpackerr runs without its web server and generates no password, while it still keeps its config file in the role's data path, owned by the role's user, and its history next to it;
+- Unpackerr watches the folder it was configured with;
 - the service does not restart during a window longer than the unit's `RestartSec`.
 
 ### `sonarr`
@@ -64,6 +76,8 @@ Installs Sonarr with [ansible-role-sonarr](https://github.com/mother-of-all-self
 - Sonarr hands out its queue to its API key, and refuses anonymous callers;
 - starting Unpackerr brings Sonarr up with it;
 - Unpackerr reaches Sonarr by its container name and reads its queue with the API key the role handed it, while the same image holding a key Sonarr never issued is refused;
+- the web UI, served without a reverse-proxy in front of it and so without a hostname, lets in the password the role handed to Unpackerr and nothing else, and Unpackerr's API reports reading Sonarr's queue;
+- an Unpackerr handed the empty listen address that `unpackerr_webserver_enabled: false` makes the role pass runs without its web server;
 - the download path Unpackerr looks in is the one the role handed it, rather than the `/downloads` it falls back to on its own;
 - Sonarr and Unpackerr see a folder placed into the download directory at the same path;
 - neither service restarts during a window longer than the units' `RestartSec`.
@@ -74,6 +88,7 @@ By default it is configured to run the scenarios on Ubuntu 26.04.
 
 ```bash
 molecule test --scenario-name default
+molecule test --scenario-name headless
 molecule test --scenario-name sonarr
 ```
 

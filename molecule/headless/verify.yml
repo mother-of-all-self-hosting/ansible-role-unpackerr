@@ -1,0 +1,227 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify Unpackerr without its web UI
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    # The watched folder, as Unpackerr sees it.
+    unpackerr_verify_watch_bind_path: "{{ unpackerr_molecule_downloads_bind_path }}/{{ unpackerr_molecule_watch_folder }}"
+
+    # What Unpackerr keeps in the directory the role mounts at /config.
+    unpackerr_verify_config_file_path: "{{ unpackerr_molecule_data_path }}/unpackerr.conf"
+
+    unpackerr_verify_units:
+      - unpackerr.service
+
+  tasks:
+    - name: Verify that Unpackerr works without its web UI
+      block:
+        # ------------------------------------------------------------------
+        # The unit is up and Unpackerr itself is running
+        # ------------------------------------------------------------------
+
+        - name: Wait for the Unpackerr systemd services to become active (up to 180s each)
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+          register: unpackerr_services
+          until: unpackerr_services.status.ActiveState == 'active'
+          retries: 36
+          delay: 5
+          loop: "{{ unpackerr_verify_units }}"
+          # So that giving up is reported by the assertion below rather than as a
+          # wall of systemd unit properties.
+          failed_when: false
+
+        # `Restart=always` in the systemd unit means that even a container which crashes
+        # and gets restarted reads as active here, so this is a precondition rather than
+        # a result.
+        - name: Assert the Unpackerr systemd services are active
+          ansible.builtin.assert:
+            that: unpackerr_services.results | map(attribute='status.ActiveState') | unique | list == ['active']
+            fail_msg: >-
+              Not every service is active:
+              {{ dict(unpackerr_verify_units | zip(unpackerr_services.results | map(attribute='status.ActiveState'))) }}
+            success_msg: "Every systemd service is active"
+
+        - name: Retrieve the Unpackerr systemd services log for debugging
+          when: unpackerr_debug_service_enabled | bool
+          ansible.builtin.command:
+            cmd: "journalctl --no-pager --output=cat --unit={{ item }}"
+          changed_when: false
+          loop: "{{ unpackerr_verify_units }}"
+
+        # The journal is read scoped to the invocation that is running now, so that
+        # an earlier start of the unit cannot pass for this one.
+        - name: Ask systemd which invocation of Unpackerr is running
+          ansible.builtin.systemd_service:
+            name: unpackerr.service
+          register: unpackerr_invocation
+
+        # Unpackerr starts watching its folders only after it has read its
+        # configuration, and logs whether it starts its web server before that.
+        - name: Wait for Unpackerr to start watching its folder (up to 180s)
+          ansible.builtin.command:
+            cmd: journalctl _SYSTEMD_INVOCATION_ID={{ unpackerr_invocation.status.InvocationID }} --no-pager --output cat
+          register: unpackerr_journal
+          until: "'[Folder] Watching' in unpackerr_journal.stdout"
+          retries: 36
+          delay: 5
+          changed_when: false
+          # So that giving up is reported by the assertions below rather than as
+          # a failed command.
+          failed_when: false
+
+        - name: Inspect Unpackerr container
+          ansible.builtin.command:
+            cmd: "docker container inspect {{ unpackerr_molecule_container }}"
+          register: unpackerr_container_raw
+          changed_when: false
+
+        - name: Assert exactly one Unpackerr container is there to inspect
+          ansible.builtin.assert:
+            that: (unpackerr_container_raw.stdout | from_json) | length == 1
+            fail_msg: >-
+              `docker container inspect {{ unpackerr_molecule_container }}` described
+              {{ (unpackerr_container_raw.stdout | from_json) | length }} containers, so the
+              role's container is not there to be read
+            success_msg: "The role's {{ unpackerr_molecule_container }} container is there"
+
+        - name: Parse the Unpackerr container definition
+          ansible.builtin.set_fact:
+            unpackerr_container: "{{ (unpackerr_container_raw.stdout | from_json)[0] }}"
+
+        # ------------------------------------------------------------------
+        # The role serves nothing: no port, no labels, no web server
+        # ------------------------------------------------------------------
+
+        # The scenario asks for the port to be published and leaves the Traefik
+        # labels enabled, so their absence is the role leaving them out for an
+        # Unpackerr that serves nothing.
+        - name: Assert the container publishes nothing and carries no labels for Traefik
+          ansible.builtin.assert:
+            that:
+              - unpackerr_container.HostConfig.PortBindings | default({}, true) == {}
+              - >-
+                (unpackerr_container.Config.Labels | default({}, true) | dict2items
+                 | selectattr('key', 'match', 'traefik\.') | list) == []
+              - "'UN_WEBSERVER_LISTEN_ADDR=' in unpackerr_container.Config.Env"
+              - >-
+                (unpackerr_container.Mounts | selectattr('Destination', 'equalto', '/config')
+                 | map(attribute='Source') | list) == [unpackerr_molecule_data_path]
+            fail_msg: >-
+              The container publishes {{ unpackerr_container.HostConfig.PortBindings }}, carries the labels
+              {{ unpackerr_container.Config.Labels | default({}, true) | dict2items | selectattr('key', 'match', 'traefik\.') | items2dict }},
+              is handed {{ unpackerr_container.Config.Env | select('match', 'UN_WEBSERVER_') | list }}, and mounts
+              {{ unpackerr_container.Mounts | map(attribute='Destination') | zip(unpackerr_container.Mounts | map(attribute='Source')) | list }}
+            success_msg: >-
+              The container publishes nothing although {{ unpackerr_container_http_host_bind_port }} was asked for,
+              carries no labels for Traefik, is handed an empty listen address, and keeps its config in
+              {{ unpackerr_molecule_data_path }}
+
+        # Left to itself Unpackerr starts its web server and generates a password for
+        # it (the `default` scenario's control shows it), so its absence here is the
+        # empty listen address the role passes. The config file and the history work
+        # the same as with the web UI.
+        - name: Assert Unpackerr runs without its web server, and keeps its config file and history
+          ansible.builtin.assert:
+            that:
+              - "'=> Webserver Disabled' in unpackerr_journal.stdout"
+              - "'Starting webserver' not in unpackerr_journal.stdout"
+              - "'Generated temporary UI password' not in unpackerr_journal.stdout"
+              - >-
+                unpackerr_journal.stdout is search('=> (Created new config file|Using Config File): /config/unpackerr\.conf')
+              - "'History file disabled' not in unpackerr_journal.stdout"
+              - >-
+                ('[Folder] Watching (fsnotify): ' ~ unpackerr_verify_watch_bind_path) in unpackerr_journal.stdout
+            fail_msg: >-
+              Unpackerr started with {{ unpackerr_journal.stdout_lines[:30] }}
+            success_msg: >-
+              Unpackerr runs without its web server and generates no password, keeps its config file in /config,
+              and watches {{ unpackerr_verify_watch_bind_path }}
+
+        - name: Check the config file Unpackerr keeps in the role's data path
+          ansible.builtin.stat:
+            path: "{{ unpackerr_verify_config_file_path }}"
+          register: unpackerr_config_file
+
+        - name: Assert the config file is in the role's data path, owned by the role's user
+          ansible.builtin.assert:
+            that:
+              - unpackerr_config_file.stat.exists
+              - unpackerr_config_file.stat.uid == unpackerr_uid | int
+              - unpackerr_config_file.stat.gid == unpackerr_gid | int
+            fail_msg: >-
+              {{ unpackerr_verify_config_file_path }} is
+              {{ ('owned by ' ~ unpackerr_config_file.stat.uid ~ ':' ~ unpackerr_config_file.stat.gid) if unpackerr_config_file.stat.exists else 'missing' }}
+            success_msg: >-
+              {{ unpackerr_verify_config_file_path }} is there, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
+
+        - name: Verify nothing was quietly restarting while all of that was being checked
+          when: "unpackerr_restarts_check_enabled | bool"
+          block:
+            # `Restart=always` means the unit reads `active` while it is crash-looping,
+            # so `active` on its own says very little. The window has to be watched with
+            # everything already running.
+            - name: Sample the restart counters
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: unpackerr_restarts_before
+              loop: "{{ unpackerr_verify_units }}"
+
+            # Comfortably longer than the unit's `RestartSec=30`, so a crash loop has to
+            # tick at least once inside the window.
+            - name: Watch the services for 45 seconds
+              ansible.builtin.pause:
+                seconds: 45
+
+            - name: Sample the restart counters again
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: unpackerr_restarts_after
+              loop: "{{ unpackerr_verify_units }}"
+
+            - name: Assert no service restarted while it was up
+              ansible.builtin.assert:
+                that:
+                  - unpackerr_restarts_after.results | map(attribute='status.NRestarts') | list == unpackerr_restarts_before.results | map(attribute='status.NRestarts') | list
+                  - unpackerr_restarts_after.results | map(attribute='status.ActiveState') | unique | list == ['active']
+                fail_msg: >-
+                  A service restarted while it was supposedly up, so `active` was hiding a crash loop.
+                  Before:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_before.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %},
+                  after:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}
+                success_msg: >-
+                  None of the services restarted over 45 seconds of watching (restarts so far:
+                  {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %})
+
+        - name: Show the Unpackerr verification summary
+          ansible.builtin.debug:
+            msg:
+              - "Unpackerr systemd: {% for unit, state in unpackerr_verify_units | zip(unpackerr_services.results | map(attribute='status.ActiveState')) %}{{ unit }} ({{ state }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Unpackerr restarts: {% for unit, restarts in unpackerr_verify_units | zip(unpackerr_restarts_after.results | default([]) | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Unpackerr web server: {{ unpackerr_journal.stdout_lines | select('search', 'Webserver') | first | default('not mentioned') }}"
+              - "Unpackerr container: published {{ unpackerr_container.HostConfig.PortBindings | default({}, true) }}, {{ unpackerr_container.Config.Labels | default({}, true) | dict2items | selectattr('key', 'match', 'traefik\\.') | list | length }} Traefik labels"
+              - "Unpackerr data path: {{ unpackerr_verify_config_file_path }}"
+
+      rescue:
+        # Whatever went wrong, the reason is almost always in the systemd service log.
+        - name: Retrieve the Unpackerr systemd service log
+          ansible.builtin.command:
+            cmd: journalctl --no-pager --output=cat --unit=unpackerr.service
+          register: unpackerr_service_log
+          changed_when: false
+
+        - name: Show the Unpackerr systemd service log
+          ansible.builtin.debug:
+            var: unpackerr_service_log.stdout_lines
+
+        - name: Fail because verification did not pass
+          ansible.builtin.fail:
+            msg: "Unpackerr verification failed. The systemd service log is printed above."

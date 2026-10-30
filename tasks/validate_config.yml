@@ -13,3 +13,108 @@
     - unpackerr_uid
     - unpackerr_gid
     - unpackerr_container_network
+
+# Unpackerr ignores what it does not know, rather than refusing to start, so these
+# would otherwise silently do nothing. The role-managed `UN_WEBSERVER_*` variables
+# would override the ones this role passes, as later lines win in an env file.
+# Each `pattern` is a regular expression, matched at the start of a line.
+- name: Fail if Unpackerr environment variables are not supported or are managed by the role
+  ansible.builtin.fail:
+    msg: >-
+      `unpackerr_environment_variables_additional_variables` contains `{{ item.name | default(item.pattern) }}…`. {{ item.msg }}
+  when: "unpackerr_environment_variables_additional_variables is search('(?m)^[ \\t]*' ~ item.pattern)"
+  with_items:
+    - pattern: UN_WHISPARR_
+      msg: >-
+        Unpackerr has no Whisparr app of its own. Configure Whisparr as a Radarr instance instead,
+        with `UN_RADARR_whisparr_*` variables (e.g. `UN_RADARR_whisparr_URL`) and `UN_RADARR_whisparr_NAME=Whisparr`.
+    # Unpackerr would look in `/downloads` instead. `PATHS=` and `PATHS_0=` do not match.
+    - pattern: "UN_(SONARR|RADARR|LIDARR|READARR)_[A-Za-z0-9_-]+_PATH="
+      name: UN_<APP>_<N>_PATH=
+      msg: >-
+        Unpackerr does not read a single download path for a Starr app, and would look in `/downloads` instead.
+        Use `PATHS_0` (e.g. `UN_SONARR_0_PATHS_0`).
+    - pattern: UN_WEBSERVER_LISTEN_ADDR=
+      msg: Use `unpackerr_webserver_enabled` and `unpackerr_container_http_port` instead.
+    - pattern: UN_WEBSERVER_URLBASE=
+      msg: Use `unpackerr_path_prefix` instead.
+    - pattern: UN_WEBSERVER_UI_PASSWORD=
+      msg: Use `unpackerr_environment_variables_un_webserver_ui_password` instead.
+    - pattern: UN_WEBSERVER_UPSTREAMS=
+      msg: Use `unpackerr_environment_variables_un_webserver_upstreams` instead.
+
+- name: Run if the web UI is enabled
+  when: unpackerr_webserver_enabled | bool
+  block:
+    # This is the URL base Unpackerr serves its web UI under (see `env.j2`), so it is checked
+    # whether or not Traefik is in front of it. The Traefik block below checks the labels' own
+    # path prefix, like the rest of the fleet does.
+    - name: Fail if unpackerr_path_prefix is not `/` or a path not ending with a slash
+      ansible.builtin.fail:
+        msg: >-
+          unpackerr_path_prefix (`{{ unpackerr_path_prefix }}`) must either be `/` or start with a slash and not end with one (e.g. `/unpackerr`).
+      when: "unpackerr_path_prefix[:1] != '/' or (unpackerr_path_prefix != '/' and unpackerr_path_prefix[-1] == '/')"
+
+    # `env.j2` would join a string character by character, and Unpackerr skips the entries
+    # it cannot parse, so no proxy would be trusted and nothing would say so.
+    - name: Fail if unpackerr_environment_variables_un_webserver_upstreams is not a list
+      ansible.builtin.fail:
+        msg: >-
+          `unpackerr_environment_variables_un_webserver_upstreams` must be a list of IP addresses or CIDR ranges
+          (e.g. `["172.16.0.0/12"]`), not a string.
+      when: unpackerr_environment_variables_un_webserver_upstreams is string
+
+    # Only a plain `username:password` (or a bare password) is held to the minimum. Unpackerr
+    # takes a stored hash (`!!cryptd!!…`), header authentication (`webauth` / `webauth:<header>`),
+    # `noauth` / `noauth:<header>` and `filepath:…` as they are.
+    - name: Fail if the Unpackerr web UI password is too short
+      ansible.builtin.fail:
+        msg: >-
+          The password in `unpackerr_environment_variables_un_webserver_ui_password` must be at least 8 characters long.
+          Specify it as `username:password` (e.g. `admin:SOME_PASSWORD_HERE`).
+      when: >-
+        unpackerr_environment_variables_un_webserver_ui_password | length > 0
+        and unpackerr_environment_variables_un_webserver_ui_password is not search('^(!!cryptd!!|(webauth|noauth)(:|$)|filepath:)')
+        and (unpackerr_environment_variables_un_webserver_ui_password.split(':', 1) | last | length) < 8
+
+    # Unpackerr takes the user from a header (`webauth`), or lets anyone in (`noauth`), only for
+    # requests from a trusted proxy, and refuses password logins in both modes. Without a trusted
+    # proxy, nobody could log in to the web UI.
+    - name: Fail if the Unpackerr web UI leaves authentication to a reverse-proxy, but trusts none
+      ansible.builtin.fail:
+        msg: >-
+          `unpackerr_environment_variables_un_webserver_ui_password` leaves authentication to a reverse-proxy (`webauth` / `noauth`),
+          which Unpackerr only accepts from a trusted proxy, so nobody could log in to the web UI.
+          Add the proxy's address or subnet to `unpackerr_environment_variables_un_webserver_upstreams`.
+      when: >-
+        unpackerr_environment_variables_un_webserver_ui_password is search('^(webauth|noauth)(:|$)')
+        and unpackerr_environment_variables_un_webserver_upstreams | length == 0
+
+- name: Run if Traefik is enabled
+  when: unpackerr_webserver_enabled | bool and unpackerr_container_labels_traefik_enabled | bool
+  block:
+    - name: Fail if the hostname for the Unpackerr web UI is not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`unpackerr_hostname`), the hostname to serve the Unpackerr web UI at.
+          To serve the web UI without Traefik instead (e.g. on a port published with `unpackerr_container_http_host_bind_port`),
+          set `unpackerr_container_labels_traefik_enabled: false`. To run Unpackerr without its web UI, set `unpackerr_webserver_enabled: false`.
+      when: "unpackerr_container_labels_traefik_hostname | string | length == 0"
+
+    - name: Fail if Traefik settings required for Unpackerr are not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`{{ item.name }}`).
+      when: "item.when | bool and lookup('vars', item.name, default='') | string | length == 0"
+      with_items:
+        - { "name": "unpackerr_container_labels_traefik_path_prefix", when: true }
+        - { "name": "unpackerr_container_labels_traefik_middleware_basic_auth_users", when: "{{ unpackerr_container_labels_traefik_middleware_basic_auth_enabled }}" }
+
+    # We ensure it doesn't end with a slash, because we handle both (slash and no-slash).
+    # Knowing that `unpackerr_container_labels_traefik_path_prefix` does not end with a slash
+    # ensures we know how to set these routes up without having to do "does it end with a slash" checks elsewhere.
+    - name: Fail if unpackerr_container_labels_traefik_path_prefix ends with a slash
+      ansible.builtin.fail:
+        msg: >-
+          unpackerr_container_labels_traefik_path_prefix (`{{ unpackerr_container_labels_traefik_path_prefix }}`) must either be `/` or not end with a slash (e.g. `/unpackerr`).
+      when: "unpackerr_container_labels_traefik_path_prefix != '/' and unpackerr_container_labels_traefik_path_prefix[-1] == '/'"

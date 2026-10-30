@@ -1,0 +1,71 @@
+{#
+SPDX-FileCopyrightText: 2023 Julian-Samuel Gebühr
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2025, 2026 spatterlight
+SPDX-FileCopyrightText: 2026 Suguru Hirahara
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+{#
+Without its HTTP server Unpackerr serves nothing a reverse-proxy could route to.
+#}
+{% if unpackerr_webserver_enabled | bool and unpackerr_container_labels_traefik_enabled | bool %}
+traefik.enable=true
+
+{% if unpackerr_container_labels_traefik_docker_network %}
+traefik.docker.network={{ unpackerr_container_labels_traefik_docker_network }}
+{% endif %}
+
+{% set middlewares = [] %}
+
+{% if unpackerr_container_labels_traefik_middleware_basic_auth_enabled | bool %}
+{% set middlewares = middlewares + [unpackerr_identifier + '-basic-auth'] %}
+traefik.http.middlewares.{{ unpackerr_identifier }}-basic-auth.basicauth.users={{ unpackerr_container_labels_traefik_middleware_basic_auth_users }}
+{% endif %}
+
+{% if unpackerr_container_labels_traefik_path_prefix != '/' %}
+traefik.http.middlewares.{{ unpackerr_identifier }}-slashless-redirect.redirectregex.regex=^({{ unpackerr_container_labels_traefik_path_prefix | quote }})$
+traefik.http.middlewares.{{ unpackerr_identifier }}-slashless-redirect.redirectregex.replacement=${1}/
+{% set middlewares = middlewares + [unpackerr_identifier + '-slashless-redirect'] %}
+{% endif %}
+
+{#
+  Intentionally not adding a stripPrefix middleware.
+  Unpackerr serves itself under the prefix via UN_WEBSERVER_URLBASE (see `env.j2`).
+#}
+
+{% if unpackerr_container_labels_traefik_additional_request_headers.keys() | length > 0 %}
+{% for name, value in unpackerr_container_labels_traefik_additional_request_headers.items() %}
+traefik.http.middlewares.{{ unpackerr_identifier }}-add-request-headers.headers.customrequestheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [unpackerr_identifier + '-add-request-headers'] %}
+{% endif %}
+
+{% if unpackerr_container_labels_traefik_additional_response_headers.keys() | length > 0 %}
+{% for name, value in unpackerr_container_labels_traefik_additional_response_headers.items() %}
+traefik.http.middlewares.{{ unpackerr_identifier }}-add-response-headers.headers.customresponseheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [unpackerr_identifier + '-add-response-headers'] %}
+{% endif %}
+
+traefik.http.routers.{{ unpackerr_identifier }}.rule={{ unpackerr_container_labels_traefik_rule }}
+{% if unpackerr_container_labels_traefik_priority | int > 0 %}
+traefik.http.routers.{{ unpackerr_identifier }}.priority={{ unpackerr_container_labels_traefik_priority }}
+{% endif %}
+traefik.http.routers.{{ unpackerr_identifier }}.service={{ unpackerr_identifier }}
+{% if middlewares | length > 0 %}
+traefik.http.routers.{{ unpackerr_identifier }}.middlewares={{ middlewares | join(',') }}
+{% endif %}
+traefik.http.routers.{{ unpackerr_identifier }}.entrypoints={{ unpackerr_container_labels_traefik_entrypoints }}
+traefik.http.routers.{{ unpackerr_identifier }}.tls={{ unpackerr_container_labels_traefik_tls | bool | to_json }}
+{% if unpackerr_container_labels_traefik_tls | bool %}
+traefik.http.routers.{{ unpackerr_identifier }}.tls.certResolver={{ unpackerr_container_labels_traefik_tls_certResolver }}
+{% endif %}
+
+traefik.http.services.{{ unpackerr_identifier }}.loadbalancer.server.port={{ unpackerr_container_http_port }}
+{% endif %}
+
+{% for arg in unpackerr_container_labels_additional_labels %}
+{{ arg }}
+{% endfor %}

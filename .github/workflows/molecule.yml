@@ -38,11 +38,14 @@ jobs:
 
     strategy:
       matrix:
-        # `default` exercises Unpackerr on its own, and `sonarr` exercises it
-        # serving a Sonarr installed by ansible-role-sonarr.
+        # `default` exercises Unpackerr on its own, `headless` exercises it
+        # without its web UI, and `sonarr` exercises it serving a Sonarr
+        # installed by ansible-role-sonarr.
         include:
           - distro: ubuntu2604
             scenario: default
+          - distro: ubuntu2604
+            scenario: headless
           - distro: ubuntu2604
             scenario: sonarr
       fail-fast: false

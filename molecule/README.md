@@ -43,7 +43,7 @@ pip3 install -r ./molecule/requirements.txt
 
 ## Scenarios
 
-There are two testing scenarios available.
+There are three testing scenarios available.
 
 ### `default`
 
@@ -58,6 +58,15 @@ It first runs the same container image with none of the role's configuration, to
 - Unpackerr generates a password for its web UI and keeps its hash in the role's data path, and the web UI is served under the path prefix only, turning away anonymous callers and wrong passwords while letting the generated password in;
 - a release folder holding an archive, moved into the watched folder, is extracted into a new folder next to it, as files owned by the role's user holding exactly what was packed;
 - after a restart, Unpackerr reads its config file back, still lets the generated password in, and still knows about the extracted release from its history;
+- the service does not restart during a window longer than the unit's `RestartSec`.
+
+### `headless`
+
+Installs Unpackerr with `unpackerr_webserver_enabled: false` and nothing else an existing installation would have to add: no hostname, with the Traefik labels left enabled and a port asked to be published. Installing at all shows that the role does not require a hostname for a web UI it does not serve. The scenario then checks that:
+
+- the container publishes no port, carries no labels for Traefik, and is handed an empty listen address;
+- Unpackerr runs without its web server and generates no password, while it still keeps its config file in the role's data path, owned by the role's user, and its history next to it;
+- Unpackerr watches the folder it was configured with;
 - the service does not restart during a window longer than the unit's `RestartSec`.
 
 ### `sonarr`
@@ -79,6 +88,7 @@ By default it is configured to run the scenarios on Ubuntu 26.04.
 
 ```bash
 molecule test --scenario-name default
+molecule test --scenario-name headless
 molecule test --scenario-name sonarr
 ```
 

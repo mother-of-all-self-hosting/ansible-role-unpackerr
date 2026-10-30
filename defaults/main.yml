@@ -66,7 +66,8 @@ unpackerr_container_http_port: 5656
 # A list of additional container networks that the container would be connected to.
 # The role does not create these networks, so make sure they already exist.
 # Use this to let Unpackerr reach Sonarr, Radarr, etc., which run in a different container network.
-unpackerr_container_additional_networks: "{{ unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom }}"
+unpackerr_container_additional_networks: "{{ (unpackerr_container_additional_networks_default + unpackerr_container_additional_networks_auto + unpackerr_container_additional_networks_custom) | unique }}"
+unpackerr_container_additional_networks_default: []
 unpackerr_container_additional_networks_auto: []
 unpackerr_container_additional_networks_custom: []
 
@@ -192,13 +193,13 @@ unpackerr_floc_optout_enabled: true
 unpackerr_hsts_preload_enabled: false
 
 # List of systemd services that the Unpackerr systemd service depends on
-unpackerr_systemd_required_services_list: "{{ unpackerr_systemd_required_services_list_default + unpackerr_systemd_required_services_list_auto + unpackerr_systemd_required_services_list_custom }}"
+unpackerr_systemd_required_services_list: "{{ (unpackerr_systemd_required_services_list_default + unpackerr_systemd_required_services_list_auto + unpackerr_systemd_required_services_list_custom) | unique }}"
 unpackerr_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
 unpackerr_systemd_required_services_list_auto: []
 unpackerr_systemd_required_services_list_custom: []
 
 # List of systemd services that the Unpackerr systemd service wants
-unpackerr_systemd_wanted_services_list: "{{ unpackerr_systemd_wanted_services_list_default + unpackerr_systemd_wanted_services_list_auto + unpackerr_systemd_wanted_services_list_custom }}"
+unpackerr_systemd_wanted_services_list: "{{ (unpackerr_systemd_wanted_services_list_default + unpackerr_systemd_wanted_services_list_auto + unpackerr_systemd_wanted_services_list_custom) | unique }}"
 unpackerr_systemd_wanted_services_list_default: []
 unpackerr_systemd_wanted_services_list_auto: []
 unpackerr_systemd_wanted_services_list_custom: []

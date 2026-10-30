@@ -222,7 +222,7 @@ The user is `admin`. Unless you have [set the password yourself](#set-the-passwo
 journalctl -u unpackerr | grep 'Generated temporary UI password'
 ```
 
-After logging in with it, change the password under `Settings > Web server`. The new password is kept (hashed) in the config file in `unpackerr_data_path`.
+After logging in with it, change the password under `Settings > Web Server`. The new password is kept (hashed) in the config file in `unpackerr_data_path`.
 
 #### Resetting the password
 
@@ -240,7 +240,7 @@ If you have set the password with `unpackerr_environment_variables_un_webserver_
 
 ### Metrics
 
-Unpackerr can expose metrics for Prometheus at `/metrics`, if `UN_WEBSERVER_METRICS=true` is added to `unpackerr_environment_variables_additional_variables`. Scraping them requires an API key with the `system:metrics:read` permission, which can be created on the web UI under `Settings > Web server`. Refer to [this page](https://unpackerr.zip/docs/install/web-ui#api-keys-and-metrics) on the documentation for details.
+Unpackerr can expose metrics for Prometheus, if `UN_WEBSERVER_METRICS=true` is added to `unpackerr_environment_variables_additional_variables`. They are served at `/metrics` at the hostname, or under the path prefix if `unpackerr_path_prefix` is set (e.g. `https://example.com/unpackerr/metrics`). Scraping them requires an API key with the `system:metrics:read` permission, which can be created on the web UI under `Settings > Web Server`. Refer to [this page](https://unpackerr.zip/docs/install/web-ui#api-keys-and-metrics) on the documentation for details.
 
 ## Troubleshooting
 

@@ -33,8 +33,9 @@ Unpackerr 1.0.0 changed how it is run, and so did this role. If you used the rol
 
 - **The web UI is enabled by default**, and served at the hostname which you need to set with `unpackerr_hostname` (see [below](#adjusting-the-playbook-configuration)). If you would rather keep running Unpackerr without it, see [this section](#running-unpackerr-without-the-web-ui).
 - Unpackerr now keeps a config file and its extraction history in the directory specified with `unpackerr_data_path` (`/unpackerr/data` by default), which the role mounts into the container. Settings saved on the web UI are written there. If you have set a log file with `UN_LOG_FILE`, Unpackerr keeps the history next to the log file instead.
-- The `UN_*` environment variables you pass with `unpackerr_environment_variables_additional_variables` keep working, but the settings they hold are shown as locked on the web UI. You can keep them, or move the settings to the web UI by removing the variables.
+- The `UN_*` environment variables you pass with `unpackerr_environment_variables_additional_variables` keep working (except for the two below), but the settings they hold are shown as locked on the web UI. You can keep them, or move the settings to the web UI by removing the variables.
 - **Whisparr is no longer an app of its own.** If you configured it with `UN_WHISPARR_*` variables, configure it as a Radarr instance instead (`UN_RADARR_whisparr_URL`, `UN_RADARR_whisparr_API_KEY`, etc.), as described in the [upgrade guide for Whisparr](https://unpackerr.zip/docs/install/upgrading#whisparr). The role refuses to run with the old variables, as Unpackerr would silently ignore them.
+- **A Starr app's single download path is no longer read.** If you set it with `UN_SONARR_0_PATH` (or the same for Radarr, Lidarr and Readarr), rename it to `UN_SONARR_0_PATHS_0`. Unpackerr would otherwise silently look in `/downloads` instead, so the role refuses to run with the old variables.
 
 Refer to [this page](https://unpackerr.zip/docs/install/upgrading) on the documentation for the complete list of changes.
 
@@ -241,7 +242,7 @@ If you have forgotten the password, stop the service, have Unpackerr write a new
 
 ```sh
 systemctl stop unpackerr
-docker run --rm --user 1000:1000 --mount type=bind,src=/unpackerr/data,dst=/config ghcr.io/unpackerr/unpackerr:v1.0.0 --reset
+docker run --rm --user 1000:1000 --mount type=bind,src=/unpackerr/data,dst=/config ghcr.io/unpackerr/unpackerr:v1.0.1 --reset
 systemctl start unpackerr
 ```
 

@@ -110,7 +110,7 @@ unpackerr_environment_variables_un_webserver_ui_password: admin:YOUR_PASSWORD_HE
 
 A password set this way is applied every time Unpackerr starts, and cannot be changed on the web UI.
 
-To let a reverse-proxy authenticate users instead, refer to [this page](https://unpackerr.zip/docs/install/web-ui#reverse-proxy) on the documentation. This requires the reverse-proxy to be trusted, as described below.
+To let a reverse-proxy authenticate users instead, refer to [this page](https://unpackerr.zip/docs/install/web-ui#reverse-proxy) on the documentation. This requires the reverse-proxy to be trusted, as described below. The role refuses to run otherwise, as nobody could log in to the web UI.
 
 ### Configuring trusted proxies (optional)
 

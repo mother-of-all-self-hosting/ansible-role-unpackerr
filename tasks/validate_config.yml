@@ -14,10 +14,10 @@
     - unpackerr_gid
     - unpackerr_container_network
 
-# Unpackerr ignores what it no longer knows, rather than refusing to start, so these
-# would otherwise silently stop working. The role-managed `UN_WEBSERVER_*` variables
+# Unpackerr ignores what it does not know, rather than refusing to start, so these
+# would otherwise silently do nothing. The role-managed `UN_WEBSERVER_*` variables
 # would override the ones this role passes, as later lines win in an env file.
-- name: Fail if Unpackerr environment variables are no longer supported or are managed by the role
+- name: Fail if Unpackerr environment variables are not supported or are managed by the role
   ansible.builtin.fail:
     msg: >-
       `unpackerr_environment_variables_additional_variables` contains `{{ item.name | default(item.prefix) }}…`. {{ item.msg }}
@@ -25,14 +25,14 @@
   with_items:
     - prefix: UN_WHISPARR_
       msg: >-
-        Unpackerr v1 no longer has a Whisparr app of its own. Configure Whisparr as a Radarr instance instead,
-        renaming `UN_WHISPARR_0_*` to `UN_RADARR_whisparr_*` (e.g. `UN_RADARR_whisparr_URL`) and adding `UN_RADARR_whisparr_NAME=Whisparr`.
-    # Since v1.0.1, Unpackerr looks in `/downloads` instead. `PATHS=` and `PATHS_0=` do not match.
+        Unpackerr has no Whisparr app of its own. Configure Whisparr as a Radarr instance instead,
+        with `UN_RADARR_whisparr_*` variables (e.g. `UN_RADARR_whisparr_URL`) and `UN_RADARR_whisparr_NAME=Whisparr`.
+    # Unpackerr would look in `/downloads` instead. `PATHS=` and `PATHS_0=` do not match.
     - prefix: "UN_(SONARR|RADARR|LIDARR|READARR)_[A-Za-z0-9_-]+_PATH="
       name: UN_<APP>_<N>_PATH=
       msg: >-
-        Unpackerr no longer reads the single download path of a Starr app, and looks in `/downloads` instead.
-        Rename the variable to `PATHS_0` (e.g. `UN_SONARR_0_PATH` to `UN_SONARR_0_PATHS_0`).
+        Unpackerr does not read a single download path for a Starr app, and would look in `/downloads` instead.
+        Use `PATHS_0` (e.g. `UN_SONARR_0_PATHS_0`).
     - prefix: UN_WEBSERVER_LISTEN_ADDR=
       msg: Use `unpackerr_webserver_enabled` and `unpackerr_container_http_port` instead.
     - prefix: UN_WEBSERVER_URLBASE=

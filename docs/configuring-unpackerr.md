@@ -23,21 +23,9 @@ This is an [Ansible](https://www.ansible.com/) role which installs [Unpackerr](h
 
 Unpackerr is a daemon which checks for completed downloads and extracts them, so that [Sonarr](https://sonarr.tv/), [Radarr](https://radarr.video/), [Lidarr](https://lidarr.audio/) and [Readarr](https://readarr.com/) (collectively "Starr apps") can import them. After a Starr app has imported the extracted files, Unpackerr deletes them again. It can also watch folders and extract whatever archives appear in them, without any Starr app involved.
 
-Since version 1.0.0, Unpackerr has a web UI, which shows the extraction queue, the history and the logs, and on which the Starr apps, the watched folders and the notifications can be configured.
+Unpackerr has a web UI, which shows the extraction queue, the history and the logs, and on which the Starr apps, the watched folders and the notifications can be configured.
 
 See the project's [documentation](https://unpackerr.zip/docs/introduction) to learn what Unpackerr does and why it might be useful to you.
-
-## Upgrading from Unpackerr 0.16 or earlier
-
-Unpackerr 1.0.0 changed how it is run, and so did this role. If you used the role before, note that:
-
-- **The web UI is enabled by default**, and served at the hostname which you need to set with `unpackerr_hostname` (see [below](#adjusting-the-playbook-configuration)). If you would rather keep running Unpackerr without it, see [this section](#running-unpackerr-without-the-web-ui).
-- Unpackerr now keeps a config file and its extraction history in the directory specified with `unpackerr_data_path` (`/unpackerr/data` by default), which the role mounts into the container. Settings saved on the web UI are written there. If you have set a log file with `UN_LOG_FILE`, Unpackerr keeps the history next to the log file instead.
-- The `UN_*` environment variables you pass with `unpackerr_environment_variables_additional_variables` keep working (except for the two below), but the settings they hold are shown as locked on the web UI. You can keep them, or move the settings to the web UI by removing the variables.
-- **Whisparr is no longer an app of its own.** If you configured it with `UN_WHISPARR_*` variables, configure it as a Radarr instance instead (`UN_RADARR_whisparr_URL`, `UN_RADARR_whisparr_API_KEY`, etc.), as described in the [upgrade guide for Whisparr](https://unpackerr.zip/docs/install/upgrading#whisparr). The role refuses to run with the old variables, as Unpackerr would silently ignore them.
-- **A Starr app's single download path is no longer read.** If you set it with `UN_SONARR_0_PATH` (or the same for Radarr, Lidarr and Readarr), rename it to `UN_SONARR_0_PATHS_0`. Unpackerr would otherwise silently look in `/downloads` instead, so the role refuses to run with the old variables.
-
-Refer to [this page](https://unpackerr.zip/docs/install/upgrading) on the documentation for the complete list of changes.
 
 ## Prerequisites
 
@@ -87,7 +75,7 @@ After adjusting the hostname, make sure to adjust your DNS records to point the 
 
 ### Running Unpackerr without the web UI
 
-If you do not need the web UI, you can turn off Unpackerr's HTTP server, which serves the web UI and its API. Unpackerr then works in the background, as versions before 1.0.0 did, and is configured with environment variables only. `unpackerr_hostname` does not need to be set in this case.
+If you do not need the web UI, you can turn off Unpackerr's HTTP server, which serves the web UI and its API. Unpackerr then works in the background, and is configured with environment variables only. `unpackerr_hostname` does not need to be set in this case.
 
 To do so, add the following configuration to your `vars.yml` file:
 

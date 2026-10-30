@@ -198,7 +198,7 @@
 
         # The statistics name every Starr app by its URL, along with when its
         # queue was last read or why it could not be - which the log line above
-        # no longer says.
+        # does not say.
         - name: Ask Unpackerr's API for its statistics with the session
           ansible.builtin.uri:
             url: "{{ unpackerr_molecule_http_url }}/api/stats"

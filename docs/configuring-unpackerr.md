@@ -216,10 +216,10 @@ The web UI becomes available at the specified hostname like `https://example.com
 
 ### Logging in to the web UI
 
-The user is `admin`. Unless you have [set the password yourself](#set-the-password-for-the-web-ui-optional), Unpackerr generates a temporary password on its first start, and logs it once. To find it, log in to the server with SSH and run the command below (replace `unpackerr` with how you/your playbook named the service, e.g. `mash-unpackerr`):
+The user is `admin`. Unless you have [set the password yourself](#set-the-password-for-the-web-ui-optional), Unpackerr generates a temporary password on its first start, and logs it once. You can output the password by running the playbook as below:
 
 ```sh
-journalctl -u unpackerr | grep 'Generated temporary UI password'
+ansible-playbook -i inventory/hosts setup.yml --tags=print-password-unpackerr
 ```
 
 After logging in with it, change the password under `Settings > Web Server`. The new password is kept (hashed) in the config file in `unpackerr_data_path`.

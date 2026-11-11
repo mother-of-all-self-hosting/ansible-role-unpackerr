@@ -357,6 +357,19 @@
               Unpackerr generated a temporary password for {{ unpackerr_verify_ui_user }}, and keeps its hash in
               {{ unpackerr_verify_config_file_path }}, owned by {{ unpackerr_uid }}:{{ unpackerr_gid }}
 
+        # Read the temporary password the way `--tags=print-password-unpackerr`
+        # does, so that a change to Unpackerr's log line fails here, not for users.
+        - name: Run the tasks behind the print-password-unpackerr tag
+          ansible.builtin.include_role:
+            name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+            tasks_from: print_password_unpackerr
+
+        - name: Assert the print-password-unpackerr tasks found the password the login below uses
+          ansible.builtin.assert:
+            that: unpackerr_temporary_password == unpackerr_verify_ui_password
+            fail_msg: "The tasks found `{{ unpackerr_temporary_password }}`, expected `{{ unpackerr_verify_ui_password }}`"
+            success_msg: "The tasks found the temporary password"
+
         - name: Ask for the web UI under the path prefix
           ansible.builtin.uri:
             url: "{{ unpackerr_molecule_http_url }}/"

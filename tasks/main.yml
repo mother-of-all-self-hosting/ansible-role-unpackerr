@@ -18,6 +18,15 @@
     - name: Install Unpackerr
       ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
 
+- name: Perform tasks to print the temporary password for Unpackerr
+  when: unpackerr_enabled | bool
+  tags:
+    - molecule-notest
+    - print-password-unpackerr
+  block:
+    - name: Print the Unpackerr temporary password
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/print_password_unpackerr.yml"
+
 - name: Perform Unpackerr uninstallation tasks
   when: not unpackerr_enabled | bool
   tags:

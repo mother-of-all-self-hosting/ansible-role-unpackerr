@@ -12,7 +12,6 @@
   with_items:
     - unpackerr_uid
     - unpackerr_gid
-    - unpackerr_container_network
 
 # Unpackerr ignores what it does not know, rather than refusing to start, so these
 # would otherwise silently do nothing. The role-managed `UN_WEBSERVER_*` variables
